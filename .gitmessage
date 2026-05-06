@@ -1,0 +1,25 @@
+# <type>[scope]: <subject>  <- imperative, lowercase, no period, <= 50 chars
+#
+# Why this change is needed (skip if obvious). What was the alternative?
+# Wrap at 72.
+#
+# Refs / breaking-change footers if any:
+# BREAKING CHANGE: ...
+# Refs: #123
+#
+# ----- types -----
+# feat      new feature for the user
+# fix       bug fix for the user
+# docs      docs only
+# refactor  code change that neither fixes a bug nor adds a feature
+# test      adding or fixing tests
+# chore     tooling, deps, repo maintenance
+# ci        CI/build pipeline
+# perf      performance improvement
+# build     build system or external dep changes
+#
+# ----- rules -----
+# - one concern per commit; if the subject can't cover it, split
+# - source + tests together; refactors separate from the feature
+# - never commit broken main; WIP only on feature branches
+# - no AI-author trailers, no marketing prose, no emoji
