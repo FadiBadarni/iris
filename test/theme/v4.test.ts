@@ -82,3 +82,48 @@ describe("parseV4 @config bridge", () => {
     expect(theme.sources).toContain(tsConfig);
   });
 });
+
+describe("parseV4 var() resolution", () => {
+  it("resolves @theme inline aliases to their :root values", async () => {
+    const theme = await parseV4(fixture("v4-shadcn-vars"));
+
+    expect(theme.tokens.get("colors.background")?.value).toBe("oklch(1 0 0)");
+    expect(theme.tokens.get("colors.foreground")?.value).toBe("oklch(0.145 0 0)");
+    expect(theme.tokens.get("colors.primary")?.value).toBe("oklch(0.205 0 0)");
+    expect(theme.tokens.get("colors.destructive")?.value).toBe("oklch(0.577 0.245 27.325)");
+  });
+
+  it("resolves chained var() through multiple hops", async () => {
+    const theme = await parseV4(fixture("v4-shadcn-vars"));
+
+    expect(theme.tokens.get("borderRadius.card")?.value).toBe("0.625rem");
+    expect(theme.tokens.get("borderRadius.lg")?.value).toBe("0.625rem");
+  });
+
+  it("infers token type from the resolved value, not the var() string", async () => {
+    const theme = await parseV4(fixture("v4-shadcn-vars"));
+
+    // --color-primary alias to var(--primary). Only the resolved
+    // oklch(...) value typed as color; the unresolved var(...) would
+    // have typed as "other" and broken every linter color lookup.
+    expect(theme.tokens.get("colors.primary")?.type).toBe("color");
+  });
+
+  it("reverse byValue lookup hits the resolved value, not the var() string", async () => {
+    const theme = await parseV4(fixture("v4-shadcn-vars"));
+
+    const matches = theme.byValue.get("oklch(0.205 0 0)");
+    expect(matches).toBeDefined();
+    expect(matches?.[0]?.name).toBe("colors.primary");
+  });
+
+  it("reports unresolved var refs as warnings without crashing the parse", async () => {
+    const theme = await parseV4(fixture("v4-shadcn-vars"));
+
+    // The fixture deliberately includes a --color-missing aliased to a var
+    // that isn't declared anywhere — should surface as a structured warning.
+    const unresolved = theme.warnings.filter((w) => w.kind === "var-unresolved");
+    expect(unresolved.length).toBeGreaterThan(0);
+    expect(unresolved.some((w) => w.message.includes("--this-does-not-exist"))).toBe(true);
+  });
+});

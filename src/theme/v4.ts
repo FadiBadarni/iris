@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import postcss from "postcss";
 import postcssImport from "postcss-import";
+import { buildVarMap, resolveVarChain } from "./resolve-vars.js";
 import type { ParseWarning, ResolvedTheme, TokenEntry, TokenSource, TokenType } from "./types.js";
 import { parseV3 } from "./v3.js";
 
@@ -80,16 +81,40 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
   const byValue = new Map<string, TokenEntry[]>();
   const warnings: ParseWarning[] = [];
 
+  // Build a var map from every :root / .dark / [data-theme="..."] / @layer
+  // base block in the flattened CSS. Used to resolve var() references that
+  // shadcn projects routinely have inside @theme inline { --color-bg:
+  // var(--bg) }.
+  const vars = buildVarMap(result.root);
+
   result.root.walkAtRules(/^theme$/, (rule) => {
     rule.walkDecls((decl) => {
       const varName = decl.prop;
-      const value = decl.value.trim();
+      const rawValue = decl.value.trim();
       if (!varName.startsWith("--")) return;
-      if (value === "initial") return; // namespace reset — drop matching prefix at lint time
+      if (rawValue === "initial") return; // namespace reset — drop matching prefix at lint time
 
+      const sourceFile = decl.source?.input.from ?? entryPath;
+      const resolution = resolveVarChain(rawValue, vars);
+      for (const refName of resolution.unresolved) {
+        warnings.push({
+          kind: "var-unresolved",
+          message: `${varName}: var(${refName}) could not be resolved against any :root declaration`,
+          file: sourceFile,
+        });
+      }
+      if (resolution.circular) {
+        warnings.push({
+          kind: "circular-var",
+          message: `${varName}: circular var() reference in ${rawValue}`,
+          file: sourceFile,
+        });
+      }
+      const value = resolution.value;
+      // Infer type from the resolved value — `var(--primary)` would otherwise
+      // type as "other"; the resolved oklch(...) types correctly as "color".
       const type = inferType(varName, value);
       const name = canonicalName(varName, type);
-      const sourceFile = decl.source?.input.from ?? entryPath;
       addToken(name, value, type, "v4-theme", sourceFile, tokens, byValue);
     });
   });
