@@ -1,5 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import postcss from "postcss";
 import postcssImport from "postcss-import";
 import { buildVarMap, resolveVarChain } from "./resolve-vars.js";
@@ -140,6 +142,13 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
     }
   }
 
+  // Tailwind v4 default theme — seed the defaults the project gets
+  // implicitly through `@import "tailwindcss"`. User @theme entries
+  // already in `tokens` win over defaults via skip-if-exists.
+  if (hasTailwindImport(result.root)) {
+    await seedV4Defaults(cwd, tokens, byValue, sources, warnings);
+  }
+
   return {
     version: 4,
     tokens,
@@ -147,6 +156,80 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
     sources: [...sources].sort(),
     warnings,
   };
+}
+
+function hasTailwindImport(root: postcss.Root): boolean {
+  let found = false;
+  root.walkAtRules("import", (rule) => {
+    const params = rule.params.trim();
+    if (/^['"]tailwindcss['"]$/.test(params) || /^['"]tailwindcss\//.test(params)) {
+      found = true;
+    }
+  });
+  return found;
+}
+
+async function seedV4Defaults(
+  projectRoot: string,
+  tokens: Map<string, TokenEntry>,
+  byValue: Map<string, TokenEntry[]>,
+  sources: Set<string>,
+  warnings: ParseWarning[],
+): Promise<void> {
+  const themeCssPath = locateV4ThemeCss(projectRoot);
+  if (!themeCssPath) {
+    warnings.push({
+      kind: "v4-defaults-not-found",
+      message:
+        '@import "tailwindcss" is declared but the tailwindcss@4 default theme css could not be located in node_modules; default tokens (red-500, text-sm, p-4, ...) will be missing',
+    });
+    return;
+  }
+
+  try {
+    const css = await readFile(themeCssPath, "utf8");
+    const root = postcss.parse(css, { from: themeCssPath });
+    root.walkAtRules(/^theme$/, (rule) => {
+      rule.walkDecls((decl) => {
+        const varName = decl.prop;
+        const value = decl.value.trim();
+        if (!varName.startsWith("--")) return;
+        if (value === "initial") return;
+        const type = inferType(varName, value);
+        const name = canonicalName(varName, type);
+        if (tokens.has(name)) return; // user @theme / bridge wins
+        addToken(name, value, type, "v4-default", themeCssPath, tokens, byValue);
+      });
+    });
+    sources.add(themeCssPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push({
+      kind: "v4-defaults-not-found",
+      message: `failed to read tailwindcss default theme at ${themeCssPath}: ${message}`,
+      file: themeCssPath,
+    });
+  }
+}
+
+function locateV4ThemeCss(projectRoot: string): string | null {
+  // createRequire pinned to a fake module path inside the target project.
+  // This makes node resolve `tailwindcss/...` from the project's own
+  // node_modules rather than from iris's.
+  const targetRequire = createRequire(pathToFileURL(`${projectRoot}/_iris_resolver.js`).href);
+  const candidates = [
+    "tailwindcss/theme.css",
+    "tailwindcss/theme/index.css",
+    "tailwindcss/preflight.css",
+  ];
+  for (const candidate of candidates) {
+    try {
+      return targetRequire.resolve(candidate);
+    } catch {
+      // not present, try next
+    }
+  }
+  return null;
 }
 
 function collectConfigBridges(root: postcss.Root, entryPath: string): string[] {

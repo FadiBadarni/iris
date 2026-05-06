@@ -1,4 +1,5 @@
-import { dirname, resolve } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseV4 } from "../../src/theme/v4.js";
@@ -125,5 +126,67 @@ describe("parseV4 var() resolution", () => {
     const unresolved = theme.warnings.filter((w) => w.kind === "var-unresolved");
     expect(unresolved.length).toBeGreaterThan(0);
     expect(unresolved.some((w) => w.message.includes("--this-does-not-exist"))).toBe(true);
+  });
+});
+
+describe("parseV4 Tailwind v4 defaults seed", () => {
+  it('warns when @import "tailwindcss" is present but tailwindcss@4 isn\'t installed', async () => {
+    // The v4-basic fixture has @import "tailwindcss" but no node_modules/
+    // tailwindcss installed under it; the resolver walks up to iris's
+    // own node_modules where only tailwindcss@3 lives (no theme.css there).
+    const theme = await parseV4(fixture("v4-basic"));
+
+    const notFound = theme.warnings.filter((w) => w.kind === "v4-defaults-not-found");
+    expect(notFound.length).toBe(1);
+  });
+
+  it("merges defaults from a tailwindcss@4 install when locatable", async () => {
+    const fixtureRoot = fixture("v4-with-defaults");
+    const fakePkgRoot = join(fixtureRoot, "node_modules", "tailwindcss");
+
+    mkdirSync(fakePkgRoot, { recursive: true });
+    writeFileSync(
+      join(fakePkgRoot, "package.json"),
+      JSON.stringify({
+        name: "tailwindcss",
+        version: "4.0.0",
+        exports: {
+          ".": "./index.js",
+          "./theme.css": "./theme.css",
+        },
+      }),
+    );
+    writeFileSync(join(fakePkgRoot, "index.js"), "export default {};");
+    writeFileSync(
+      join(fakePkgRoot, "theme.css"),
+      `@theme {
+        --color-red-500: oklch(0.6 0.245 27);
+        --color-blue-500: oklch(0.65 0.2 250);
+        --spacing-4: 1rem;
+        --font-size-sm: 0.875rem;
+      }`,
+    );
+
+    try {
+      const theme = await parseV4(fixtureRoot);
+
+      // User token wins over default if names collide; user's brand stays
+      expect(theme.tokens.get("colors.brand")?.value).toBe("#ef4444");
+
+      // Defaults are present with the v4-default source tag
+      expect(theme.tokens.get("colors.red-500")?.value).toBe("oklch(0.6 0.245 27)");
+      expect(theme.tokens.get("colors.red-500")?.source).toBe("v4-default");
+      expect(theme.tokens.get("spacing.4")?.value).toBe("1rem");
+      expect(theme.tokens.get("fontSize.sm")?.value).toBe("0.875rem");
+
+      // theme.css path is in sources for cache invalidation
+      expect(theme.sources.some((s) => s.endsWith("theme.css"))).toBe(true);
+
+      // No defaults-not-found warning when the file resolves
+      const notFound = theme.warnings.filter((w) => w.kind === "v4-defaults-not-found");
+      expect(notFound).toEqual([]);
+    } finally {
+      rmSync(join(fixtureRoot, "node_modules"), { recursive: true, force: true });
+    }
   });
 });
