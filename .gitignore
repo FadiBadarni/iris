@@ -44,3 +44,6 @@ Thumbs.db
 
 # Octopus orchestration session artifacts (per-run prompts; results live in ~/.claude-octopus)
 .octopus/
+
+# Claude Octopus runtime state (auto-written by orchestrate.sh — not project history)
+.claude-octopus/
