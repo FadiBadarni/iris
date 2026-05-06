@@ -46,5 +46,4 @@ export type ParseOptions = {
   cwd?: string | undefined;
   noCache?: boolean | undefined;
   entry?: string | undefined;
-  allowPartial?: boolean | undefined;
 };

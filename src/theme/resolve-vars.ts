@@ -13,9 +13,17 @@ const MAX_DEPTH = 8;
  * Includes declarations inside `@layer base { :root { ... } }` because
  * postcss `walkRules` recurses into at-rules by default.
  */
+// Recognises selectors that host project-wide design tokens. Component-
+// scoped --vars (e.g. inside `.button { ... }`) and any --vars declared
+// inside @theme rules themselves do not belong in the resolution map —
+// they would either pollute it with implementation details or, worse, fold
+// in as the source of their own resolution.
+const GLOBAL_SCOPE_RE = /:root\b|:host\b|\.dark\b|\[data-theme\b/;
+
 export function buildVarMap(root: Root): Map<string, string> {
   const vars = new Map<string, string>();
   root.walkRules((rule) => {
+    if (!GLOBAL_SCOPE_RE.test(rule.selector)) return;
     rule.walkDecls((decl) => {
       if (!decl.prop.startsWith("--")) return;
       if (vars.has(decl.prop)) return;

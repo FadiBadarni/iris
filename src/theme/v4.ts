@@ -223,11 +223,7 @@ function locateV4ThemeCss(projectRoot: string): string | null {
   // This makes node resolve `tailwindcss/...` from the project's own
   // node_modules rather than from iris's.
   const targetRequire = createRequire(pathToFileURL(`${projectRoot}/_iris_resolver.js`).href);
-  const candidates = [
-    "tailwindcss/theme.css",
-    "tailwindcss/theme/index.css",
-    "tailwindcss/preflight.css",
-  ];
+  const candidates = ["tailwindcss/theme.css", "tailwindcss/theme/index.css"];
   for (const candidate of candidates) {
     try {
       return targetRequire.resolve(candidate);

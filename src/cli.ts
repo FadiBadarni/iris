@@ -21,7 +21,6 @@ cli
         const theme = await parseTheme({
           cwd: options.cwd,
           entry: options.entry,
-          allowPartial: options.allowPartial,
         });
 
         let fatal = false;
