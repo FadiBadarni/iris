@@ -1,1 +1,10 @@
 export const version = "0.0.0";
+
+export { lookupByName, lookupByValue, parseTheme } from "./theme/parse.js";
+export type {
+  ParseOptions,
+  ResolvedTheme,
+  TokenEntry,
+  TokenSource,
+  TokenType,
+} from "./theme/types.js";

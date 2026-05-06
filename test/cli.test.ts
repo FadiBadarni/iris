@@ -43,9 +43,17 @@ describe("iris cli", () => {
     expect(stdout).toContain("lint");
   });
 
-  it("lint subcommand exits non-zero with not-implemented notice", () => {
-    const { stdout, code } = run(["lint"]);
+  it("lint parses the theme and reports token count, exits 1 (not-implemented engine)", () => {
+    const fixturePath = resolve(here, "fixtures", "v3-basic");
+    const { stdout, code } = run(["lint", "--cwd", fixturePath]);
     expect(code).toBe(1);
+    expect(stdout).toContain("parsed tailwind v3 theme");
     expect(stdout).toContain("not implemented");
+  });
+
+  it("lint exits 2 when no tailwind project is detected", () => {
+    const { stdout, code } = run(["lint", "--cwd", here]);
+    expect(code).toBe(2);
+    expect(stdout).toContain("no tailwind");
   });
 });

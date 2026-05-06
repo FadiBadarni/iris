@@ -29,6 +29,6 @@ export type ResolvedTheme = {
 };
 
 export type ParseOptions = {
-  cwd?: string;
-  noCache?: boolean;
+  cwd?: string | undefined;
+  noCache?: boolean | undefined;
 };
