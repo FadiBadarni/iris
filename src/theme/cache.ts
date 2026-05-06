@@ -1,7 +1,7 @@
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ResolvedTheme, TokenEntry } from "./types.js";
+import type { ParseWarning, ResolvedTheme, TokenEntry } from "./types.js";
 
 type Fingerprint = Record<string, number>;
 
@@ -10,6 +10,7 @@ type SerializedTheme = {
   tokens: Array<[string, TokenEntry]>;
   byValue: Array<[string, TokenEntry[]]>;
   sources: string[];
+  warnings?: ParseWarning[];
 };
 
 type CacheEntry = {
@@ -112,6 +113,7 @@ function serialize(theme: ResolvedTheme): SerializedTheme {
     tokens: [...theme.tokens.entries()],
     byValue: [...theme.byValue.entries()],
     sources: theme.sources,
+    warnings: theme.warnings,
   };
 }
 
@@ -121,5 +123,8 @@ function deserialize(s: SerializedTheme): ResolvedTheme {
     tokens: new Map(s.tokens),
     byValue: new Map(s.byValue),
     sources: s.sources,
+    // Default to [] for cache entries written before the warnings field
+    // existed — they pre-date this fix and have no warnings to surface.
+    warnings: s.warnings ?? [],
   };
 }

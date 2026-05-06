@@ -51,6 +51,7 @@ describe("cache", () => {
       ],
     ]),
     sources: [sourceFile],
+    warnings: [],
   });
 
   it("stores and retrieves a theme", async () => {

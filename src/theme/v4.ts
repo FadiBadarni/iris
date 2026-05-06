@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import postcss from "postcss";
 import postcssImport from "postcss-import";
-import type { ResolvedTheme, TokenEntry, TokenSource, TokenType } from "./types.js";
+import type { ParseWarning, ResolvedTheme, TokenEntry, TokenSource, TokenType } from "./types.js";
 import { parseV3 } from "./v3.js";
 
 const V4_CSS_CANDIDATES = [
@@ -78,6 +78,7 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
 
   const tokens = new Map<string, TokenEntry>();
   const byValue = new Map<string, TokenEntry[]>();
+  const warnings: ParseWarning[] = [];
 
   result.root.walkAtRules(/^theme$/, (rule) => {
     rule.walkDecls((decl) => {
@@ -103,9 +104,14 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
       const v3Theme = await parseV3(dirname(configPath));
       mergeBridgedTheme(v3Theme, tokens, byValue);
       for (const src of v3Theme.sources) sources.add(src);
+      for (const w of v3Theme.warnings) warnings.push(w);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn(`iris: @config bridge failed for ${configPath}: ${message}`);
+      warnings.push({
+        kind: "config-bridge-failed",
+        message: `@config bridge failed for ${configPath}: ${message}`,
+        file: configPath,
+      });
     }
   }
 
@@ -114,6 +120,7 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
     tokens,
     byValue,
     sources: [...sources].sort(),
+    warnings,
   };
 }
 

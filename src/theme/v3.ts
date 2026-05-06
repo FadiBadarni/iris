@@ -66,6 +66,7 @@ export async function parseV3(cwd: string): Promise<ResolvedTheme> {
     tokens,
     byValue,
     sources: [...sources].sort(),
+    warnings: [],
   };
 }
 
