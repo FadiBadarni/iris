@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Cache
+.cache/
+.eslintcache
+.parcel-cache/
+.turbo/
+
+# Claude Code local settings (keep .claude/ for shared config, ignore local overrides)
+.claude/settings.local.json
