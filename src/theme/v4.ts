@@ -6,7 +6,7 @@ import postcss from "postcss";
 import postcssImport from "postcss-import";
 import { buildVarMap, resolveVarChain } from "./resolve-vars.js";
 import type { ParseWarning, ResolvedTheme, TokenEntry, TokenSource, TokenType } from "./types.js";
-import { parseV3 } from "./v3.js";
+import { parseV3FromConfigPath } from "./v3.js";
 
 const V4_CSS_CANDIDATES = [
   "app/globals.css",
@@ -128,7 +128,7 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
   const configBridges = collectConfigBridges(result.root, entryPath);
   for (const configPath of configBridges) {
     try {
-      const v3Theme = await parseV3(dirname(configPath));
+      const v3Theme = await parseV3FromConfigPath(configPath);
       mergeBridgedTheme(v3Theme, tokens, byValue);
       for (const src of v3Theme.sources) sources.add(src);
       for (const w of v3Theme.warnings) warnings.push(w);

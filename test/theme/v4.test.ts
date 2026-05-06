@@ -82,6 +82,22 @@ describe("parseV4 @config bridge", () => {
     expect(theme.sources).toContain(cssEntry);
     expect(theme.sources).toContain(tsConfig);
   });
+
+  it("loads a v3 config from a non-standard @config filename via parseV3FromConfigPath", async () => {
+    const theme = await parseV4(fixture("v4-config-bridge-custom-name"));
+
+    // The legacy config defines colors.legacy. Without parseV3FromConfigPath
+    // this would have searched for tailwind.config.* in the same directory,
+    // missed the file, and silently dropped the legacy tokens.
+    expect(theme.tokens.get("colors.legacy")?.value).toBe("#0ea5e9");
+    expect(theme.tokens.get("colors.legacy")?.source).toBe("v4-config-bridge");
+    expect(theme.tokens.get("spacing.legacy")?.value).toBe("1.25rem");
+
+    const cssEntry = resolve(fixture("v4-config-bridge-custom-name"), "app", "globals.css");
+    const legacyConfig = resolve(fixture("v4-config-bridge-custom-name"), "tailwind.legacy.ts");
+    expect(theme.sources).toContain(cssEntry);
+    expect(theme.sources).toContain(legacyConfig);
+  });
 });
 
 describe("parseV4 var() resolution", () => {

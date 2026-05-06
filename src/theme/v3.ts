@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import Module, { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import type { Config } from "tailwindcss";
@@ -39,13 +39,23 @@ export async function parseV3(cwd: string): Promise<ResolvedTheme> {
   if (!configPath) {
     throw new Error(`iris: no tailwind.config.{ts,js,mjs,cjs} found at ${cwd}`);
   }
+  return parseV3FromConfigPath(configPath);
+}
 
+/**
+ * Parse a v3 tailwind config from an explicit absolute path. Used by the v4
+ * @config bridge to honor non-standard filenames like `tailwind.legacy.ts`
+ * — parseV3 only finds files matching tailwind.config.{ts,js,mjs,cjs} via
+ * directory scan.
+ */
+export async function parseV3FromConfigPath(configPath: string): Promise<ResolvedTheme> {
+  const configDir = dirname(configPath);
   const sources = new Set<string>([configPath]);
-  const restoreHook = installResolveHook(sources, cwd);
+  const restoreHook = installResolveHook(sources, configDir);
 
   let userConfig: Config;
   try {
-    const jiti = createJiti(pathToFileURL(`${cwd}/`).href, { interopDefault: true });
+    const jiti = createJiti(pathToFileURL(`${configDir}/`).href, { interopDefault: true });
     const loaded = await raceTimeout(
       jiti.import<unknown>(configPath),
       TIMEOUT_MS,
