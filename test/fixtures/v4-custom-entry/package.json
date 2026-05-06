@@ -1,0 +1,8 @@
+{
+  "name": "fixture-v4-custom-entry",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "tailwindcss": "^4.0.0"
+  }
+}

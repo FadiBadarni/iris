@@ -7,17 +7,24 @@ import { parseV4 } from "./v4.js";
 
 export async function parseTheme(options: ParseOptions = {}): Promise<ResolvedTheme> {
   const cwd = resolvePath(options.cwd ?? process.cwd());
+  const entryAbs = options.entry ? resolvePath(cwd, options.entry) : undefined;
+  // Composite key — two invocations with the same project root but
+  // different --entry overrides must not share a cache entry.
+  const cacheKey = entryAbs ? `${cwd}::${entryAbs}` : cwd;
 
   if (!options.noCache) {
-    const cached = await getCached(cwd);
+    const cached = await getCached(cacheKey);
     if (cached) return cached;
   }
 
   const detected = await detectVersion(cwd);
-  const theme = detected.version === 3 ? await parseV3(cwd) : await parseV4(cwd);
+  const theme =
+    detected.version === 3
+      ? await parseV3(cwd)
+      : await parseV4(cwd, options.entry ? { entry: options.entry } : {});
 
   if (!options.noCache) {
-    await setCached(cwd, theme);
+    await setCached(cacheKey, theme);
   }
 
   return theme;

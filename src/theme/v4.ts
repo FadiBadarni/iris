@@ -51,9 +51,15 @@ const TYPE_NAMESPACE: Record<TokenType, string> = {
   other: "other",
 };
 
-export async function parseV4(cwd: string): Promise<ResolvedTheme> {
-  const entryPath = await findCssEntry(cwd);
+export async function parseV4(
+  cwd: string,
+  options: { entry?: string } = {},
+): Promise<ResolvedTheme> {
+  const entryPath = await findCssEntry(cwd, options.entry);
   if (!entryPath) {
+    if (options.entry) {
+      throw new Error(`iris: --entry "${options.entry}" not found relative to ${cwd}`);
+    }
     throw new Error(`iris: no v4 globals.css found at ${cwd}`);
   }
 
@@ -258,7 +264,16 @@ function mergeBridgedTheme(
   }
 }
 
-async function findCssEntry(cwd: string): Promise<string | null> {
+async function findCssEntry(cwd: string, override?: string): Promise<string | null> {
+  if (override) {
+    const abs = resolve(cwd, override);
+    try {
+      await stat(abs);
+      return abs;
+    } catch {
+      return null;
+    }
+  }
   for (const rel of V4_CSS_CANDIDATES) {
     const abs = resolve(cwd, rel);
     try {

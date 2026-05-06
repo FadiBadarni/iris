@@ -55,4 +55,46 @@ describe("parseTheme dispatcher", () => {
     const t2 = await parseTheme({ cwd: fixture("v3-basic"), noCache: true });
     expect(t1.tokens.size).toBe(t2.tokens.size);
   });
+
+  it("loads tokens from a non-standard CSS path via the entry override", async () => {
+    const theme = await parseTheme({
+      cwd: fixture("v4-custom-entry"),
+      entry: "packages/ui/src/theme.css",
+      noCache: true,
+    });
+    expect(theme.version).toBe(4);
+    expect(theme.tokens.get("colors.monorepo-brand")?.value).toBe("oklch(0.5 0.2 264)");
+    expect(theme.tokens.get("spacing.monorepo")?.value).toBe("1.75rem");
+  });
+
+  it("composite cache key separates entries under the same project root", async () => {
+    await clearCache();
+
+    // First entry — set up cache for entry A
+    const t1 = await parseTheme({
+      cwd: fixture("v4-custom-entry"),
+      entry: "packages/ui/src/theme.css",
+    });
+    expect(t1.tokens.get("colors.monorepo-brand")).toBeDefined();
+
+    // Different entry under the same project root must not hit the cache
+    // for the first entry. With the broken single-key cache, this would
+    // return t1's tokens.
+    await expect(
+      parseTheme({
+        cwd: fixture("v4-custom-entry"),
+        entry: "does-not-exist.css",
+      }),
+    ).rejects.toThrow(/--entry "does-not-exist.css" not found/);
+  });
+
+  it("throws cleanly when entry is set but the file is missing", async () => {
+    await expect(
+      parseTheme({
+        cwd: fixture("v4-custom-entry"),
+        entry: "missing/file.css",
+        noCache: true,
+      }),
+    ).rejects.toThrow(/not found relative to/);
+  });
 });
