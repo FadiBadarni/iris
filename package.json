@@ -1,0 +1,65 @@
+{
+  "name": "iris",
+  "version": "0.0.0",
+  "description": "MCP server and CLI that grounds AI coding assistants in your Next.js + Tailwind design system",
+  "type": "module",
+  "license": "MIT",
+  "author": "Fadi Badarni",
+  "homepage": "https://github.com/FadiBadarni/iris",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FadiBadarni/iris.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FadiBadarni/iris/issues"
+  },
+  "keywords": [
+    "tailwindcss",
+    "claude-code",
+    "mcp",
+    "design-tokens",
+    "linter",
+    "shadcn",
+    "nextjs"
+  ],
+  "engines": {
+    "node": ">=18.18"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "bin": {
+    "iris": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src test",
+    "format": "biome format --write src test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "dependencies": {
+    "cac": "^6.7.14"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
