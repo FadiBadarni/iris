@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+/* CSS-defined token — should win over the JS config when names collide */
+@theme {
+  --color-brand: #ef4444;
+  --spacing-tight: 0.25rem;
+}

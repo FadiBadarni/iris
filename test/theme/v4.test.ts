@@ -54,3 +54,31 @@ describe("parseV4", () => {
     expect(theme.sources).toContain(expected);
   });
 });
+
+describe("parseV4 @config bridge", () => {
+  it("merges tokens from a v3 config referenced via @config", async () => {
+    const theme = await parseV4(fixture("v4-config-bridge"));
+
+    // CSS @theme wins for colliding names — brand stays #ef4444 not #3b82f6
+    expect(theme.tokens.get("colors.brand")?.value).toBe("#ef4444");
+    expect(theme.tokens.get("colors.brand")?.source).toBe("v4-theme");
+
+    // JS-only token survives the bridge with the v4-config-bridge source tag
+    const legacy = theme.tokens.get("colors.legacy");
+    expect(legacy?.value).toBe("#1e40af");
+    expect(legacy?.source).toBe("v4-config-bridge");
+
+    // Pure CSS token is also present
+    expect(theme.tokens.get("spacing.tight")?.value).toBe("0.25rem");
+  });
+
+  it("tracks both the css entry and the bridged js config in sources", async () => {
+    const theme = await parseV4(fixture("v4-config-bridge"));
+
+    const cssEntry = resolve(fixture("v4-config-bridge"), "app", "globals.css");
+    const tsConfig = resolve(fixture("v4-config-bridge"), "tailwind.config.ts");
+
+    expect(theme.sources).toContain(cssEntry);
+    expect(theme.sources).toContain(tsConfig);
+  });
+});

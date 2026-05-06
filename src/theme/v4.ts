@@ -1,8 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import postcss from "postcss";
 import postcssImport from "postcss-import";
 import type { ResolvedTheme, TokenEntry, TokenSource, TokenType } from "./types.js";
+import { parseV3 } from "./v3.js";
 
 const V4_CSS_CANDIDATES = [
   "app/globals.css",
@@ -92,12 +93,54 @@ export async function parseV4(cwd: string): Promise<ResolvedTheme> {
     });
   });
 
+  // @config bridge — v4 projects can pull a v3 JS config in via
+  // `@config "./tailwind.config.ts"`. Walk those, run the v3 adapter on
+  // each target, and merge non-conflicting tokens. CSS @theme entries
+  // already in `tokens` win over JS config entries.
+  const configBridges = collectConfigBridges(result.root, entryPath);
+  for (const configPath of configBridges) {
+    try {
+      const v3Theme = await parseV3(dirname(configPath));
+      mergeBridgedTheme(v3Theme, tokens, byValue);
+      for (const src of v3Theme.sources) sources.add(src);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`iris: @config bridge failed for ${configPath}: ${message}`);
+    }
+  }
+
   return {
     version: 4,
     tokens,
     byValue,
     sources: [...sources].sort(),
   };
+}
+
+function collectConfigBridges(root: postcss.Root, entryPath: string): string[] {
+  const paths: string[] = [];
+  root.walkAtRules("config", (rule) => {
+    const raw = rule.params.trim().replace(/^['"]|['"]$/g, "");
+    if (!raw) return;
+    const sourceFile = rule.source?.input.from ?? entryPath;
+    paths.push(resolve(dirname(sourceFile), raw));
+  });
+  return paths;
+}
+
+function mergeBridgedTheme(
+  bridged: ResolvedTheme,
+  tokens: Map<string, TokenEntry>,
+  byValue: Map<string, TokenEntry[]>,
+): void {
+  for (const [name, entry] of bridged.tokens) {
+    if (tokens.has(name)) continue; // CSS @theme wins
+    const bridgedEntry: TokenEntry = { ...entry, source: "v4-config-bridge" };
+    tokens.set(name, bridgedEntry);
+    const list = byValue.get(bridgedEntry.value) ?? [];
+    list.push(bridgedEntry);
+    byValue.set(bridgedEntry.value, list);
+  }
 }
 
 async function findCssEntry(cwd: string): Promise<string | null> {
