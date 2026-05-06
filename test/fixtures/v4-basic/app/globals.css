@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #3b82f6;
+  --color-brand-salmon: #fa8072;
+  --color-muted: #f3f4f6;
+  --spacing-gutter: 1.5rem;
+  --font-size-display: 3rem;
+  --radius-card: 0.75rem;
+}

@@ -1,0 +1,8 @@
+{
+  "name": "fixture-v3-monorepo-preset",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}
