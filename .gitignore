@@ -41,3 +41,6 @@ Thumbs.db
 
 # Claude Code local settings (keep .claude/ for shared config, ignore local overrides)
 .claude/settings.local.json
+
+# Octopus orchestration session artifacts (per-run prompts; results live in ~/.claude-octopus)
+.octopus/
