@@ -2,6 +2,8 @@
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { loadConfig } from "../config/load.js";
+import type { IrisConfig } from "../config/types.js";
 import { parseTheme } from "../index.js";
 import { parseShadcn } from "../shadcn/detect.js";
 import type { ShadcnState } from "../shadcn/types.js";
@@ -13,6 +15,10 @@ async function main(): Promise<void> {
   const startupCwd = process.cwd();
   const themeCache = new Map<string, Awaited<ReturnType<typeof parseTheme>>>();
   const shadcnCache = new Map<string, ShadcnState>();
+  // null = "we tried, the config was missing or broken; don't retry on
+  // every tool call." Daemon-friendly so a malformed config doesn't hammer
+  // the filesystem for the lifetime of the connection.
+  const configCache = new Map<string, IrisConfig | null>();
 
   const server = createIrisMcpServer({
     resolveTheme: async (filename, projectRoot) => {
@@ -41,6 +47,29 @@ async function main(): Promise<void> {
       const shadcn = await parseShadcn({ cwd: root });
       shadcnCache.set(key, shadcn);
       return shadcn;
+    },
+    resolveConfig: async (filename, projectRoot) => {
+      const root = resolveProjectRoot(filename, projectRoot, startupCwd);
+      const key = cacheKey(root);
+      if (configCache.has(key)) {
+        return configCache.get(key) ?? undefined;
+      }
+      try {
+        const cfg = (await loadConfig({ cwd: root })) ?? null;
+        configCache.set(key, cfg);
+        return cfg ?? undefined;
+      } catch (err) {
+        // Log once per project root; cache null so we don't hit the FS
+        // on every subsequent tool call. Daemon stays fast, operator
+        // sees the error in stderr.
+        process.stderr.write(
+          `iris-mcp: failed to load iris.config at ${root} — falling back to defaults: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+        configCache.set(key, null);
+        return undefined;
+      }
     },
   });
 

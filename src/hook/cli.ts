@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
+import { loadConfig } from "../config/load.js";
+import type { IrisConfig } from "../config/types.js";
 import { parseTheme } from "../index.js";
 import { parseShadcn } from "../shadcn/detect.js";
 import { type HookEvent, preWrite } from "./preWrite.js";
@@ -50,7 +52,21 @@ async function main(): Promise<void> {
   // The hook should never fail because shadcn is missing.
   const shadcn = await parseShadcn({ cwd });
 
-  const decision = await preWrite(event, theme, shadcn);
+  // iris.config.{ts,mjs,js} is optional. A broken config shouldn't freeze
+  // the hook; warn to stderr (visible in `claude --debug`) and fall back
+  // to defaults. Same posture as the parseTheme catch above.
+  let config: IrisConfig | undefined;
+  try {
+    config = (await loadConfig({ cwd })) ?? undefined;
+  } catch (err) {
+    process.stderr.write(
+      `iris-hook: failed to load iris.config — falling back to defaults: ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+  }
+
+  const decision = await preWrite(event, theme, shadcn, config);
   if (decision !== null) {
     process.stdout.write(JSON.stringify(decision));
   }

@@ -4,6 +4,7 @@
 // shell makes the lint decision testable without spawning processes or
 // stubbing stdio.
 
+import type { IrisConfig } from "../config/types.js";
 import { formatHuman } from "../lint/format.js";
 import { lintSource } from "../lint/linter.js";
 import type { IrisLintMessage } from "../lint/types.js";
@@ -38,13 +39,14 @@ export async function preWrite(
   event: HookEvent,
   theme: ResolvedTheme,
   shadcn?: ShadcnState,
+  config?: IrisConfig,
 ): Promise<HookDecision> {
   if (!JSX_LIKE.test(event.tool_input.file_path)) return null;
 
   const source = extractSource(event);
   if (!source) return null;
 
-  const messages = await lintSource(source, event.tool_input.file_path, theme, shadcn);
+  const messages = await lintSource(source, event.tool_input.file_path, theme, shadcn, config);
   if (messages.length === 0) return null;
 
   // Only error-severity blocks. Warnings (no-custom-classname today, more

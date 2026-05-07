@@ -24,3 +24,7 @@ export type {
   ShadcnWarning,
   ShadcnWarningKind,
 } from "./shadcn/types.js";
+
+export { loadConfig } from "./config/load.js";
+export { defineConfig } from "./config/types.js";
+export type { IrisConfig, IrisRuleSeverity } from "./config/types.js";

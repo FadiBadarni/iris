@@ -3,6 +3,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { relative, resolve as resolvePath } from "node:path";
 import { cac } from "cac";
 import fastGlob from "fast-glob";
+import { loadConfig } from "./config/load.js";
+import type { IrisConfig } from "./config/types.js";
 import { parseTheme, version } from "./index.js";
 import { applyFixes } from "./lint/fix.js";
 import { type FileResult, formatHuman, formatJson, formatSarif } from "./lint/format.js";
@@ -53,6 +55,17 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
   for (const w of shadcn.warnings) {
     if (w.kind === "no-shadcn") continue;
     io.err(`iris warn [${w.kind}]: ${w.message}`);
+  }
+
+  // Load iris.config.{ts,mjs,js} if present. The CLI surfaces errors and
+  // exits 2 — the user invoked the linter intentionally and should know
+  // their config is broken before iris falls back to defaults.
+  let config: IrisConfig | null = null;
+  try {
+    config = await loadConfig({ cwd });
+  } catch (err) {
+    io.err(`iris: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
   }
 
   let fatal = false;
@@ -107,7 +120,7 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
     // produced from `relative(cwd, abs)` only at output time.
     const absForLint = abs.replace(/\\/g, "/");
     const displayPath = relative(cwd, abs).replace(/\\/g, "/");
-    const messages = await lintSource(source, absForLint, theme, shadcn);
+    const messages = await lintSource(source, absForLint, theme, shadcn, config ?? undefined);
     if (messages.length === 0) continue;
 
     if (options.fix === true) {

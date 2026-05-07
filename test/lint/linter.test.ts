@@ -205,3 +205,109 @@ describe("lintSource — slice β.2 shadcn awareness", () => {
     expect(messages.some((m) => m.ruleId === "tailwindcss/no-arbitrary-value")).toBe(true);
   });
 });
+
+describe("lintSource — slice v0.4 α config integration", () => {
+  test("rules: 'off' silences a rule end-to-end", async () => {
+    const source = `export const X = () => <div className="bg-[#f3f4f6]" />;`;
+    const messages = await lintSource(source, "Hero.tsx", undefined, undefined, {
+      rules: { "tailwindcss/no-arbitrary-value": "off" },
+    });
+    expect(messages).toEqual([]);
+  });
+
+  test("rules: 'warn' demotes an error to a warning", async () => {
+    const source = `export const X = () => <div className="bg-[#f3f4f6]" />;`;
+    const messages = await lintSource(source, "Hero.tsx", undefined, undefined, {
+      rules: { "tailwindcss/no-arbitrary-value": "warn" },
+    });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.severity).toBe("warning");
+    expect(messages[0]?.ruleId).toBe("tailwindcss/no-arbitrary-value");
+  });
+
+  test("rules: 'error' promotes the shadcn warning to an error", async () => {
+    const shadcn = fakeShadcn([
+      {
+        name: "Button",
+        filePath: "/proj/components/ui/button.tsx",
+        importPath: "@/components/ui/button",
+      },
+    ]);
+    const source = "export function Button() { return <button />; }";
+    const messages = await lintSource(source, "Hero.tsx", undefined, shadcn, {
+      rules: { "iris/no-reinventing-shadcn": "error" },
+    });
+    const reinvent = messages.find((m) => m.ruleId === "iris/no-reinventing-shadcn");
+    expect(reinvent).toBeDefined();
+    expect(reinvent?.severity).toBe("error");
+  });
+
+  test("allowlist: string regex suppresses matching arbitrary values", async () => {
+    // bg-[hsl(...)] is not in DEFAULT_ALLOWLIST. With the user's regex it
+    // should be filtered before the message reaches the output.
+    const source = `export const X = () => <div className="bg-[hsl(120_50%_60%)]" />;`;
+    const withoutConfig = await lintSource(source, "Hero.tsx");
+    expect(withoutConfig).toHaveLength(1);
+    const withConfig = await lintSource(source, "Hero.tsx", undefined, undefined, {
+      allowlist: ["bg-\\[hsl\\("],
+    });
+    expect(withConfig).toEqual([]);
+  });
+
+  test("allowlist: literal RegExp also works", async () => {
+    const source = `export const X = () => <div className="bg-[hsl(120_50%_60%)]" />;`;
+    const withConfig = await lintSource(source, "Hero.tsx", undefined, undefined, {
+      allowlist: [/^bg-\[hsl\(/],
+    });
+    expect(withConfig).toEqual([]);
+  });
+
+  test("rules: 'off' on iris/no-reinventing-shadcn silences the v0.3 rule", async () => {
+    const shadcn = fakeShadcn([
+      {
+        name: "Button",
+        filePath: "/proj/components/ui/button.tsx",
+        importPath: "@/components/ui/button",
+      },
+    ]);
+    const source = "export function Button() { return <button />; }";
+    const messages = await lintSource(source, "Hero.tsx", undefined, shadcn, {
+      rules: { "iris/no-reinventing-shadcn": "off" },
+    });
+    expect(messages.find((m) => m.ruleId === "iris/no-reinventing-shadcn")).toBeUndefined();
+  });
+
+  test("config is optional — back-compat with no fifth arg", async () => {
+    const source = `export const X = () => <div className="bg-[#f3f4f6]" />;`;
+    const messages = await lintSource(source, "Hero.tsx");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.severity).toBe("error");
+  });
+
+  test("rules: { 'unknown': 'off' } does NOT silence real diagnostics with non-null ruleIds", async () => {
+    // toIrisMessage defaults a missing ESLint ruleId to "unknown" for
+    // presentation, but the override map should be matched against the
+    // raw ESLint ruleId — otherwise a user keyed override on "unknown"
+    // would silence every parser/internal diagnostic. The affirmative
+    // check: a valid violation isn't suppressed by an "unknown" override.
+    const source = `export const X = () => <div className="bg-[#f3f4f6]" />;`;
+    const messages = await lintSource(source, "Hero.tsx", undefined, undefined, {
+      rules: { unknown: "off" },
+    });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.ruleId).toBe("tailwindcss/no-arbitrary-value");
+  });
+
+  test("user RegExp with /g flag still allowlists deterministically", async () => {
+    // User passes a stateful regex. RegExp.prototype.test on /g/ flagged
+    // patterns advances `lastIndex`, so without normalization the second
+    // class would miss. Codex 5.5 high flagged this; the fix strips g/y.
+    const source = `export const X = () => (
+      <div className="bg-[hsl(120_50%_60%)] bg-[hsl(220_50%_60%)]" />
+    );`;
+    const messages = await lintSource(source, "Hero.tsx", undefined, undefined, {
+      allowlist: [/^bg-\[hsl\(/g],
+    });
+    expect(messages).toEqual([]);
+  });
+});

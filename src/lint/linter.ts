@@ -2,9 +2,10 @@ import { basename } from "node:path";
 import tsParser from "@typescript-eslint/parser";
 import { Linter } from "eslint";
 import tailwindPlugin from "eslint-plugin-tailwindcss";
+import type { IrisConfig } from "../config/types.js";
 import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
-import { DEFAULT_ALLOWLIST, isAllowlisted } from "./allowlist.js";
+import { type AllowlistPattern, DEFAULT_ALLOWLIST, isAllowlisted } from "./allowlist.js";
 import { synthesizeV3Config } from "./config-synth.js";
 import { extractClassFromMessage } from "./extract.js";
 import { suggestToken } from "./rewrite.js";
@@ -99,6 +100,7 @@ export async function lintSource(
   filename: string,
   theme?: ResolvedTheme,
   shadcn?: ShadcnState,
+  config?: IrisConfig,
 ): Promise<IrisLintMessage[]> {
   const baseLayers = theme === undefined ? baseConfig : configFor(theme);
   const cfg = shadcn === undefined ? baseLayers : [...baseLayers, shadcnLayer(shadcn)];
@@ -118,15 +120,49 @@ export async function lintSource(
     physicalFilename: fullFilename,
     // biome-ignore lint/suspicious/noExplicitAny: physicalFilename missing from LintOptions type
   } as any);
+
+  // User config: pre-compile allowlist regexes once and resolve the rule
+  // override map for cheap per-message lookup. Both default to no-op when
+  // the caller didn't pass a config.
+  const allowlistPatterns = combineAllowlist(config);
+  const ruleOverrides = config?.rules ?? {};
+
   const out: IrisLintMessage[] = [];
   for (const m of raw) {
+    // Look up the override against the ESLint ruleId, NOT toIrisMessage's
+    // "unknown" presentation fallback — otherwise `rules: { unknown: "off" }`
+    // would silence every parser/internal diagnostic ESLint emits without
+    // a ruleId. Codex 5.5 high flagged this on the v0.4 α review.
+    const override =
+      m.ruleId !== null && m.ruleId !== undefined ? ruleOverrides[m.ruleId] : undefined;
+    if (override === "off") continue;
     const msg = toIrisMessage(m, theme);
-    if (msg.classname !== undefined && isAllowlisted(msg.classname, DEFAULT_ALLOWLIST)) {
+    if (override === "warn") msg.severity = "warning";
+    else if (override === "error") msg.severity = "error";
+    if (msg.classname !== undefined && isAllowlisted(msg.classname, allowlistPatterns)) {
       continue;
     }
     out.push(msg);
   }
   return out;
+}
+
+function combineAllowlist(config: IrisConfig | undefined): AllowlistPattern[] {
+  const extras = config?.allowlist;
+  if (!extras || extras.length === 0) return DEFAULT_ALLOWLIST;
+  const compiled: AllowlistPattern[] = [];
+  for (const p of extras) {
+    if (p instanceof RegExp) {
+      // Strip `g` / `y` flags: they make `RegExp.prototype.test` stateful
+      // via `lastIndex`, so repeated calls (we test every classname on
+      // every lint pass) would alternate between matching and missing.
+      const flags = p.flags.replace(/[gy]/g, "");
+      compiled.push(flags === p.flags ? p : new RegExp(p.source, flags));
+    } else {
+      compiled.push(new RegExp(p));
+    }
+  }
+  return [...DEFAULT_ALLOWLIST, ...compiled];
 }
 
 function toIrisMessage(m: Linter.LintMessage, theme?: ResolvedTheme): IrisLintMessage {

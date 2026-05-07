@@ -11,6 +11,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { IrisConfig } from "../config/types.js";
 import { lintSource } from "../lint/linter.js";
 import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
@@ -31,9 +32,19 @@ export type ResolveShadcn = (
   projectRoot?: string,
 ) => Promise<ShadcnState | undefined>;
 
+// Optional injection for v0.4 iris.config.{ts,mjs,js} loading. Returning
+// undefined means "no config" — the linter falls back to defaults (same
+// as a project without a config file). The cli wrapper mounts this with
+// `loadConfig`; tests can pass a fake.
+export type ResolveConfig = (
+  filename?: string,
+  projectRoot?: string,
+) => Promise<IrisConfig | undefined>;
+
 export type CreateServerOpts = {
   resolveTheme: ResolveTheme;
   resolveShadcn?: ResolveShadcn;
+  resolveConfig?: ResolveConfig;
 };
 
 const LINT_TOOL_NAME = "lint_source";
@@ -145,9 +156,21 @@ async function handleLintSource(rawArgs: unknown, opts: CreateServerOpts) {
     }
   }
 
+  // Same best-effort posture for iris.config: a malformed file shouldn't
+  // freeze the lint path. The cli wrapper logs the parse error to stderr
+  // before falling back; we just take the no-config branch here.
+  let config: IrisConfig | undefined;
+  if (opts.resolveConfig) {
+    try {
+      config = await opts.resolveConfig(args.filename, projectRoot);
+    } catch {
+      config = undefined;
+    }
+  }
+
   let messages: Awaited<ReturnType<typeof lintSource>>;
   try {
-    messages = await lintSource(args.source, args.filename, theme, shadcn);
+    messages = await lintSource(args.source, args.filename, theme, shadcn, config);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return errorResult(`iris: lintSource failed for ${args.filename}: ${msg}`);
