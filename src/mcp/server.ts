@@ -142,7 +142,7 @@ const GET_TOKEN_MAP_DESCRIPTION =
   "List the project's resolved Tailwind design tokens. Each entry is { name, value, type, source, file } where type is one of color, spacing, fontSize, fontFamily, fontWeight, borderRadius, lineHeight, letterSpacing, boxShadow, screen, other and source identifies whether the token came from a v3 config, a v4 @theme block, the v4 config bridge, or Tailwind's defaults. Call this before generating Tailwind classes so you can reach for project tokens (`bg-brand-salmon`, `text-sm`) instead of arbitrary values.";
 
 export function createIrisMcpServer(opts: CreateServerOpts): Server {
-  const server = new Server({ name: "iris", version: "0.5.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "iris", version: "0.5.2" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [

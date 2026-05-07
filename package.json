@@ -1,6 +1,6 @@
 {
   "name": "iris-cc",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "description": "MCP server and CLI that grounds AI coding assistants in your Next.js + Tailwind design system",
   "type": "module",
   "license": "MIT",
@@ -13,16 +13,24 @@
   "bugs": {
     "url": "https://github.com/FadiBadarni/iris/issues"
   },
-  "keywords": ["tailwindcss", "claude-code", "mcp", "design-tokens", "linter", "shadcn", "nextjs"],
+  "keywords": [
+    "tailwindcss",
+    "claude-code",
+    "mcp",
+    "design-tokens",
+    "linter",
+    "shadcn",
+    "nextjs"
+  ],
   "engines": {
     "node": ">=18.18"
   },
   "packageManager": "pnpm@9.15.0",
   "bin": {
-    "iris": "./dist/cli.js",
-    "iris-hook": "./dist/hook/cli.js",
-    "iris-mcp": "./dist/mcp/cli.js",
-    "iris-daemon": "./dist/daemon/cli.js"
+    "iris": "dist/cli.js",
+    "iris-hook": "dist/hook/cli.js",
+    "iris-mcp": "dist/mcp/cli.js",
+    "iris-daemon": "dist/daemon/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -36,7 +44,13 @@
       "import": "./dist/lint/index.js"
     }
   },
-  "files": ["dist", "examples", "CHANGELOG.md", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "examples",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

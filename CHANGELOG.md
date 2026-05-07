@@ -2,6 +2,14 @@
 
 All notable changes to iris are documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] — 2026-05-07
+
+Republish to restore bin entries. v0.5.1 published with all four bin entries (`iris`, `iris-hook`, `iris-mcp`, `iris-daemon`) silently stripped because npm rejected the `./dist/...` path prefix and removed the entries rather than fixing them. v0.5.2 ships the package.json with bare `dist/...` paths (per `npm pkg fix`) so the bins land. **Don't install v0.5.1** — none of the binaries are wired up. **No functional changes vs the v0.5.0 source code.**
+
+## [0.5.1] — 2026-05-07
+
+Republish for npm-website readme display. v0.4.0 and v0.5.0 were published via `pnpm publish`, which doesn't inject the README into the per-version manifest the way `npm publish` does. The result was npmjs.com showing "This package does not have a README" even though the file shipped inside the tarball. v0.5.1 republished via `npm publish` so the per-version `readme` + `readmeFilename` fields populate correctly. **Superseded by 0.5.2 — install that instead.**
+
 ## [0.5.0] — 2026-05-07
 
 Production performance. The Claude Code hook now runs against a long-running per-project `iris-daemon` that holds warm theme + config caches across calls (shadcn detection runs fresh each call — cheap, no in-memory state to keep). The first daemon use for a project pays the hook startup + daemon spawn + first parse cost; every subsequent healthy-daemon call is a loopback HTTP POST, well under the <200ms CLAUDE.md budget that previous versions blew through at 450–570ms each call. Minor bump because the public surface grows: a new `iris-daemon` bin, the daemon's HTTP `/lint` and `/health` endpoints, and a new `IRIS_NO_DAEMON` env-var contract. The existing `iris-hook`, `iris-mcp`, and `iris` bins keep their behavior; programmatic API is unchanged.
