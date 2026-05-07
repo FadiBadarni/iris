@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { parseTheme } from "../index.js";
 import { createIrisMcpServer } from "./server.js";
@@ -14,21 +14,39 @@ async function main(): Promise<void> {
   const server = createIrisMcpServer({
     resolveTheme: async (filename, projectRoot) => {
       const root = resolveProjectRoot(filename, projectRoot, startupCwd);
-      const cached = themeCache.get(root);
+      const key = cacheKey(root);
+      const cached = themeCache.get(key);
       if (cached) return cached;
       // parseTheme has its own mtime-keyed cache (src/theme/cache.ts), so this
       // map is the daemon-level one — keyed by resolved root rather than cwd
       // so monorepo workspaces don't fight each other.
       const theme = await parseTheme({ cwd: root });
-      themeCache.set(root, theme);
+      themeCache.set(key, theme);
       return theme;
     },
   });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Close the transport on shutdown so any in-flight cache writes flush. The
+  // theme cache is JSON-serialized to disk via writeFile (not atomic) — a
+  // raw SIGTERM mid-write would leave a half-written file.
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      server.close().finally(() => process.exit(0));
+    });
+  }
   // server.connect resolves once initialized; the transport keeps the
   // process alive until the client disconnects.
+}
+
+function cacheKey(root: string): string {
+  // Windows file paths are case-insensitive (NTFS by default). `C:\Repo` and
+  // `c:\repo` resolve to the same theme; without normalization a daemon
+  // would parse twice and risk stale entries. Linux/macOS paths stay
+  // case-sensitive.
+  return process.platform === "win32" ? root.toLowerCase() : root;
 }
 
 function resolveProjectRoot(
@@ -46,10 +64,11 @@ function resolveProjectRoot(
 }
 
 function findProjectRoot(filePath: string): string | null {
-  // Same walk-up-from-filename as the hook (src/hook/cli.ts). Bounded to 30
-  // levels to defeat symlink loops.
+  // Walk up from the file's *directory* (not the file itself — the first
+  // iteration would otherwise stat `<file>/package.json` and waste a step).
+  // Bounded to 30 levels to defeat symlink loops.
   const fs = require("node:fs") as typeof import("node:fs");
-  let dir = resolvePath(filePath);
+  let dir = dirname(resolvePath(filePath));
   for (let i = 0; i < 30; i++) {
     try {
       fs.statSync(resolvePath(dir, "package.json"));

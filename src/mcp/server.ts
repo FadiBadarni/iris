@@ -41,7 +41,11 @@ const TOOL_INPUT_SCHEMA = {
     },
   },
   required: ["source", "filename"],
-  additionalProperties: false,
+  // No `additionalProperties: false` — clients (Claude Code, Cursor) extend
+  // tool calls with metadata fields over time (e.g. requestId). The runtime
+  // typeof guards in the handler enforce the required types; rejecting
+  // unknown fields at the schema level just makes iris fragile against
+  // forward-compatible client changes.
 } as const;
 
 const TOOL_DESCRIPTION =
@@ -103,10 +107,16 @@ export function createIrisMcpServer(opts: CreateServerOpts): Server {
 
 function errorResult(message: string): {
   content: Array<{ type: "text"; text: string }>;
+  structuredContent: { error: string };
   isError: true;
 } {
+  // Mirror the success-path shape: structuredContent carries the same
+  // information programmatically, content[0].text carries it as plain
+  // text. A consumer that always JSON.parses content[0].text on the
+  // success contract would otherwise crash on the error path.
   return {
     content: [{ type: "text", text: message }],
+    structuredContent: { error: message },
     isError: true,
   };
 }

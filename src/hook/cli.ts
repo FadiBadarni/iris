@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { resolve as resolvePath } from "node:path";
+import { dirname, resolve as resolvePath } from "node:path";
 import { parseTheme } from "../index.js";
 import { type HookEvent, preWrite } from "./preWrite.js";
 
@@ -52,10 +52,12 @@ async function main(): Promise<void> {
 }
 
 function findProjectRoot(filePath: string): string | null {
-  // Walk up from the file looking for package.json. Bounded to 30 levels
-  // to defeat symlink loops; falls back to process.cwd() in main().
+  // Walk up from the file's directory looking for package.json. Bounded to
+  // 30 levels to defeat symlink loops; falls back to process.cwd() in
+  // main(). Walking from `dirname` (not the path itself) avoids a wasted
+  // first iteration that stats `<file>/package.json`.
   const fs = require("node:fs") as typeof import("node:fs");
-  let dir = resolvePath(filePath);
+  let dir = dirname(resolvePath(filePath));
   for (let i = 0; i < 30; i++) {
     try {
       fs.statSync(resolvePath(dir, "package.json"));
