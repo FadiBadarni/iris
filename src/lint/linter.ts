@@ -1,6 +1,8 @@
 import tsParser from "@typescript-eslint/parser";
 import { Linter } from "eslint";
 import tailwindPlugin from "eslint-plugin-tailwindcss";
+import { DEFAULT_ALLOWLIST, isAllowlisted } from "./allowlist.js";
+import { extractClassFromMessage } from "./extract.js";
 import type { IrisLintMessage } from "./types.js";
 
 const linter = new Linter({ configType: "flat" });
@@ -28,8 +30,16 @@ const config: Linter.FlatConfig[] = [
 ];
 
 export async function lintSource(source: string, filename: string): Promise<IrisLintMessage[]> {
-  const messages = linter.verify(source, config, { filename });
-  return messages.map(toIrisMessage);
+  const raw = linter.verify(source, config, { filename });
+  const out: IrisLintMessage[] = [];
+  for (const m of raw) {
+    const msg = toIrisMessage(m);
+    if (msg.classname !== undefined && isAllowlisted(msg.classname, DEFAULT_ALLOWLIST)) {
+      continue;
+    }
+    out.push(msg);
+  }
+  return out;
 }
 
 function toIrisMessage(m: Linter.LintMessage): IrisLintMessage {
@@ -42,5 +52,7 @@ function toIrisMessage(m: Linter.LintMessage): IrisLintMessage {
   };
   if (m.endLine !== undefined) out.endLine = m.endLine;
   if (m.endColumn !== undefined) out.endColumn = m.endColumn;
+  const classname = extractClassFromMessage(m.message);
+  if (classname !== null) out.classname = classname;
   return out;
 }
