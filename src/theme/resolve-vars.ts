@@ -18,12 +18,29 @@ const MAX_DEPTH = 8;
 // inside @theme rules themselves do not belong in the resolution map —
 // they would either pollute it with implementation details or, worse, fold
 // in as the source of their own resolution.
-const GLOBAL_SCOPE_RE = /:root\b|:host\b|\.dark\b|\[data-theme\b/;
+//
+// Each branch in a comma-separated selector list is tested independently;
+// the rule contributes vars only when EVERY branch is a global anchor.
+// `.dark .panel` does not qualify (the descendant combinator scopes the
+// vars to .panel inside .dark), but `.dark, :root[data-theme="dim"]` does.
+const GLOBAL_BRANCH_RE =
+  /^(?::root|:host|html)(?:\.[\w-]+|\[[^\]]+\])*$|^\.dark$|^\[data-theme(?:[~|^$*]?=["'][^"']+["'])?\]$/;
+
+function isGlobalScope(selector: string): boolean {
+  // `selector.split(",")` is sufficient for design-token selectors in
+  // practice — none of the recognised anchors carry commas inside their
+  // own form. Trim each branch before testing.
+  const branches = selector.split(",");
+  for (const branch of branches) {
+    if (!GLOBAL_BRANCH_RE.test(branch.trim())) return false;
+  }
+  return branches.length > 0;
+}
 
 export function buildVarMap(root: Root): Map<string, string> {
   const vars = new Map<string, string>();
   root.walkRules((rule) => {
-    if (!GLOBAL_SCOPE_RE.test(rule.selector)) return;
+    if (!isGlobalScope(rule.selector)) return;
     rule.walkDecls((decl) => {
       if (!decl.prop.startsWith("--")) return;
       if (vars.has(decl.prop)) return;

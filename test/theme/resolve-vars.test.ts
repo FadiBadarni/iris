@@ -22,6 +22,32 @@ describe("buildVarMap", () => {
     );
     expect(vars.get("--bg")).toBe("oklch(1 0 0)");
   });
+
+  it("ignores --vars declared in component-scoped descendant selectors", () => {
+    // `.dark .panel { --bg: ... }` is component-scoped — those vars only
+    // apply inside .panel under .dark and must not pollute the global map.
+    const vars = buildVarMap(root(".dark .panel { --bg: rgb(0 0 0); }"));
+    expect(vars.has("--bg")).toBe(false);
+  });
+
+  it("collects from comma-separated lists where every branch is a global anchor", () => {
+    const vars = buildVarMap(root('.dark, :root[data-theme="dim"] { --bg: rgb(0 0 0); }'));
+    expect(vars.get("--bg")).toBe("rgb(0 0 0)");
+  });
+
+  it("rejects a comma-separated list where any branch is descendant-scoped", () => {
+    // Mixed list — one branch is global, one is descendant. Reject the
+    // whole rule rather than partially collecting; the user's intent for
+    // a mixed list is ambiguous and partial collection would silently
+    // import component-scoped values.
+    const vars = buildVarMap(root(":root, .dark .panel { --bg: rgb(0 0 0); }"));
+    expect(vars.has("--bg")).toBe(false);
+  });
+
+  it("accepts :root with attribute selectors", () => {
+    const vars = buildVarMap(root(':root[data-theme="dim"] { --primary: oklch(0.4 0.2 200); }'));
+    expect(vars.get("--primary")).toBe("oklch(0.4 0.2 200)");
+  });
 });
 
 describe("resolveVarChain", () => {
