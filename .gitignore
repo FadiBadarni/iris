@@ -33,6 +33,10 @@ Thumbs.db
 .idea/
 *.swp
 
+# Windows: a background OS process occasionally creates a literal `%SystemDrive%`
+# directory in the cwd (Caches/cversions.db etc.). Never project content.
+%SystemDrive%/
+
 # Cache
 .cache/
 .eslintcache

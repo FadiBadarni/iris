@@ -156,6 +156,41 @@ describe("parseV4 Tailwind v4 defaults seed", () => {
     expect(notFound.length).toBe(1);
   });
 
+  it('seeds defaults when @import "tailwindcss" carries v4 modifiers', async () => {
+    // Tailwind v4 supports `source(...)`, `theme(...)`, `prefix(...)`,
+    // `layer(...)` modifiers after the import URL. The previous regex
+    // required the params to be exactly `"tailwindcss"`, so any modifier
+    // silently disabled default seeding.
+    const fixtureRoot = fixture("v4-tailwind-import-modifier");
+    const fakePkgRoot = join(fixtureRoot, "node_modules", "tailwindcss");
+
+    mkdirSync(fakePkgRoot, { recursive: true });
+    writeFileSync(
+      join(fakePkgRoot, "package.json"),
+      JSON.stringify({
+        name: "tailwindcss",
+        version: "4.0.0",
+        exports: { ".": "./index.js", "./theme.css": "./theme.css" },
+      }),
+    );
+    writeFileSync(join(fakePkgRoot, "index.js"), "export default {};");
+    writeFileSync(
+      join(fakePkgRoot, "theme.css"),
+      "@theme { --color-red-500: oklch(0.6 0.245 27); }",
+    );
+
+    try {
+      const theme = await parseV4(fixtureRoot);
+      // The user's color survives
+      expect(theme.tokens.get("colors.brand")?.value).toBe("oklch(0.7 0.15 260)");
+      // Defaults seeded despite the modifier
+      expect(theme.tokens.get("colors.red-500")?.value).toBe("oklch(0.6 0.245 27)");
+      expect(theme.warnings.filter((w) => w.kind === "v4-defaults-not-found")).toEqual([]);
+    } finally {
+      rmSync(join(fixtureRoot, "node_modules"), { recursive: true, force: true });
+    }
+  });
+
   it("merges defaults from a tailwindcss@4 install when locatable", async () => {
     const fixtureRoot = fixture("v4-with-defaults");
     const fakePkgRoot = join(fixtureRoot, "node_modules", "tailwindcss");

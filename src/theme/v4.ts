@@ -225,8 +225,16 @@ function bridgedNameSuppressed(canonicalName: string, suppressed: Set<string>): 
 function hasTailwindImport(root: postcss.Root): boolean {
   let found = false;
   root.walkAtRules("import", (rule) => {
-    const params = rule.params.trim();
-    if (/^['"]tailwindcss['"]$/.test(params) || /^['"]tailwindcss\//.test(params)) {
+    // Tailwind v4 supports modifiers after the import URL:
+    //   @import "tailwindcss" source(none);
+    //   @import "tailwindcss" theme(static) prefix(tw);
+    //   @import "tailwindcss/utilities" layer(utilities);
+    // Match only the leading quoted URL token; treat anything after the
+    // closing quote as opaque.
+    const match = rule.params.trim().match(/^['"]([^'"]+)['"]/);
+    if (!match) return;
+    const url = match[1] ?? "";
+    if (url === "tailwindcss" || url.startsWith("tailwindcss/")) {
       found = true;
     }
   });
