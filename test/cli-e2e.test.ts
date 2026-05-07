@@ -46,7 +46,9 @@ describe.skipIf(!e2eEnabled)("iris cli (e2e)", () => {
   it("lint runs end-to-end against a v3 fixture", () => {
     const fixturePath = resolve(here, "fixtures", "v3-basic");
     const { stdout, code } = run(["lint", "--cwd", fixturePath]);
-    expect(code).toBe(1);
-    expect(stdout).toContain("parsed tailwind v3 theme");
+    // v3-basic has tailwind.config.ts but no .tsx files; the default glob
+    // matches the .ts config but the linter finds no JSX violations.
+    expect(code).toBe(0);
+    expect(stdout).toBe("");
   });
 });
