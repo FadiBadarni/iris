@@ -1,8 +1,10 @@
 import tsParser from "@typescript-eslint/parser";
 import { Linter } from "eslint";
 import tailwindPlugin from "eslint-plugin-tailwindcss";
+import type { ResolvedTheme } from "../theme/types.js";
 import { DEFAULT_ALLOWLIST, isAllowlisted } from "./allowlist.js";
 import { extractClassFromMessage } from "./extract.js";
+import { suggestToken } from "./rewrite.js";
 import type { IrisLintMessage } from "./types.js";
 
 const linter = new Linter({ configType: "flat" });
@@ -29,11 +31,15 @@ const config: Linter.FlatConfig[] = [
   },
 ];
 
-export async function lintSource(source: string, filename: string): Promise<IrisLintMessage[]> {
+export async function lintSource(
+  source: string,
+  filename: string,
+  theme?: ResolvedTheme,
+): Promise<IrisLintMessage[]> {
   const raw = linter.verify(source, config, { filename });
   const out: IrisLintMessage[] = [];
   for (const m of raw) {
-    const msg = toIrisMessage(m);
+    const msg = toIrisMessage(m, theme);
     if (msg.classname !== undefined && isAllowlisted(msg.classname, DEFAULT_ALLOWLIST)) {
       continue;
     }
@@ -42,7 +48,7 @@ export async function lintSource(source: string, filename: string): Promise<Iris
   return out;
 }
 
-function toIrisMessage(m: Linter.LintMessage): IrisLintMessage {
+function toIrisMessage(m: Linter.LintMessage, theme?: ResolvedTheme): IrisLintMessage {
   const out: IrisLintMessage = {
     ruleId: m.ruleId ?? "unknown",
     severity: m.severity === 2 ? "error" : "warning",
@@ -53,6 +59,11 @@ function toIrisMessage(m: Linter.LintMessage): IrisLintMessage {
   if (m.endLine !== undefined) out.endLine = m.endLine;
   if (m.endColumn !== undefined) out.endColumn = m.endColumn;
   const classname = extractClassFromMessage(m.message);
-  if (classname !== null) out.classname = classname;
+  if (classname !== null) {
+    out.classname = classname;
+    if (theme !== undefined) {
+      out.suggestion = suggestToken(classname, theme);
+    }
+  }
   return out;
 }

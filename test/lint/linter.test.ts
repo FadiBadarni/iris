@@ -1,5 +1,19 @@
 import { describe, expect, test } from "vitest";
 import { lintSource } from "../../src/lint/linter.js";
+import type { ResolvedTheme, TokenEntry } from "../../src/theme/types.js";
+
+function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>): ResolvedTheme {
+  const tokens = new Map<string, TokenEntry>();
+  const byValue = new Map<string, TokenEntry[]>();
+  for (const partial of entries) {
+    const entry: TokenEntry = { source: "v4-theme", file: "test.css", ...partial };
+    tokens.set(entry.name, entry);
+    const list = byValue.get(entry.value) ?? [];
+    list.push(entry);
+    byValue.set(entry.value, list);
+  }
+  return { version: 4, tokens, byValue, sources: ["test.css"], warnings: [] };
+}
 
 describe("lintSource — slice A walking skeleton", () => {
   test("flags arbitrary-value class in JSX", async () => {
@@ -45,5 +59,45 @@ describe("lintSource — slice B allowlist + extract", () => {
     const source = `export const X = () => <div className="bg-[#abc]" />;`;
     const messages = await lintSource(source, "Hero.tsx");
     expect(messages[0]?.message).toBe("Arbitrary value detected in 'bg-[#abc]'");
+  });
+});
+
+describe("lintSource — slice C.1 semantic rewriting", () => {
+  test("populates suggestion with exact match when theme has the value", async () => {
+    const theme = fakeTheme([{ name: "colors.muted", value: "#f3f4f6", type: "color" }]);
+    const source = `export const X = () => <div className="bg-[#f3f4f6]" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.suggestion).toEqual({
+      kind: "exact",
+      tokenName: "colors.muted",
+      replacement: "bg-muted",
+    });
+  });
+
+  test("populates suggestion with near match for off-scale fontSize", async () => {
+    const theme = fakeTheme([{ name: "fontSize.sm", value: "14px", type: "fontSize" }]);
+    const source = `export const X = () => <div className="text-[15px]" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.suggestion).toEqual({
+      kind: "near",
+      tokenName: "fontSize.sm",
+      replacement: "text-sm",
+      delta: 1,
+    });
+  });
+
+  test("suggestion is 'none' when theme is empty", async () => {
+    const theme = fakeTheme([]);
+    const source = `export const X = () => <div className="bg-[#fa8072]" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    expect(messages[0]?.suggestion).toEqual({ kind: "none" });
+  });
+
+  test("suggestion is undefined when no theme is passed", async () => {
+    const source = `export const X = () => <div className="bg-[#fa8072]" />;`;
+    const messages = await lintSource(source, "Hero.tsx");
+    expect(messages[0]?.suggestion).toBeUndefined();
   });
 });
