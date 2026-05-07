@@ -27,7 +27,7 @@ const MAX_DEPTH = 8;
 // `:is(:root, .dark)` and `:where(:root, .dark)` are unwrapped — same
 // scoping semantics as the comma-list for our purposes.
 const GLOBAL_BRANCH_RE =
-  /^(?::root|:host|html)(?:\.[\w-]+|\[[^\]]+\])*$|^\.dark$|^\[data-theme(?:[~|^$*]?=["'][^"']+["'])?\]$/;
+  /^(?::root|:host|html)(?:\.[\w-]+|\[[^\]]+\])*$|^\.dark$|^\[\s*data-theme\s*(?:[~|^$*]?\s*=\s*["'][^"']+["'])?\s*\]$/;
 const IS_WHERE_WRAPPER_RE = /^:(?:is|where)\((.+)\)$/;
 
 function isGlobalBranch(branch: string): boolean {

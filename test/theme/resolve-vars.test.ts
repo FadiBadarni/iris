@@ -59,6 +59,13 @@ describe("buildVarMap", () => {
     expect(vars2.get("--fg")).toBe("rgb(255 255 255)");
   });
 
+  it('accepts whitespace inside [data-theme = "..."]', () => {
+    // CSS allows whitespace around the attribute operator. The previous
+    // regex required `[data-theme="x"]` exactly and rejected the spaced form.
+    const vars = buildVarMap(root('[data-theme = "dim"] { --bg: rgb(10 10 10); }'));
+    expect(vars.get("--bg")).toBe("rgb(10 10 10)");
+  });
+
   it("rejects :is(...) wrappers that contain descendant selectors", () => {
     // :is(:root, .dark .panel) — the inner .dark .panel branch is not a
     // global anchor, so the whole rule must be rejected.
