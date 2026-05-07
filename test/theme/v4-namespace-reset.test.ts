@@ -117,6 +117,50 @@ describe("parseV4 namespace reset suppression", () => {
     }
   });
 
+  it("non-color namespace reset wipes matching @config-bridged tokens (v3→v4 prefix mapping)", async () => {
+    // Exercises a namespace whose v3 name differs from its v4 prefix
+    // (`fontWeight` → `--font-weight-`). Catches regressions in the prefix
+    // mapping table inside bridgedNameSuppressed.
+    const root = fixture("v4-basic");
+    const tailwindConfigPath = "tailwind.bridge-fw.cjs";
+    const css = `@import "tailwindcss";
+@config "./${tailwindConfigPath}";
+
+@theme {
+  --font-weight-*: initial;
+  --font-weight-bold: 800;
+}`;
+    const configBody = `module.exports = {
+  theme: {
+    extend: {
+      fontWeight: {
+        // Bridged into the wiped namespace — must be dropped
+        legacy: '450',
+      },
+      colors: {
+        // Different namespace — must survive
+        legacy: '#1e40af',
+      },
+    },
+  },
+};
+`;
+    const entryRel = "globals-fw-reset.css";
+    writeFileSync(join(root, entryRel), css);
+    writeFileSync(join(root, tailwindConfigPath), configBody);
+    try {
+      await withFakeTailwind(root, DEFAULTS, async () => {
+        const theme = await parseV4(root, { entry: entryRel });
+        expect(theme.tokens.has("fontWeight.legacy")).toBe(false);
+        expect(theme.tokens.get("colors.legacy")?.value).toBe("#1e40af");
+        expect(theme.tokens.get("fontWeight.bold")?.value).toBe("800");
+      });
+    } finally {
+      rmSync(join(root, entryRel), { force: true });
+      rmSync(join(root, tailwindConfigPath), { force: true });
+    }
+  });
+
   it("namespace reset also wipes matching @config-bridged tokens", async () => {
     const root = fixture("v4-basic");
     const tailwindConfigPath = "tailwind.bridge.cjs";

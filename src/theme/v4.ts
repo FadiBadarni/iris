@@ -216,9 +216,14 @@ function bridgedNameSuppressed(canonicalName: string, suppressed: Set<string>): 
   if (dot < 0) return false;
   const ns = canonicalName.slice(0, dot);
   const tail = canonicalName.slice(dot + 1).replace(/\./g, "-");
-  const v4Prefix = V3_NS_TO_V4_PREFIX[ns];
-  if (!v4Prefix) return false;
-  const synthetic = tail ? `--${v4Prefix}-${tail}` : `--${v4Prefix}`;
+  // Prefer the v3 → v4 prefix mapping when known (handles the common case
+  // where v4 renamed the namespace, e.g. fontSize → text). For namespaces
+  // not in the table — including any future v3 namespace that walkTheme
+  // learns to emit — fall back to using the v3 namespace as the prefix
+  // directly, so the suppression path is at least best-effort instead of
+  // silently keeping a token the user wiped.
+  const prefix = V3_NS_TO_V4_PREFIX[ns] ?? ns;
+  const synthetic = tail ? `--${prefix}-${tail}` : `--${prefix}`;
   return isSuppressed(synthetic, suppressed);
 }
 
