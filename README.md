@@ -1,6 +1,6 @@
 # iris
 
-> **Status: v0.1 in development. Not yet installable. Spec is settled, code is being written. v0.1 ship target: ~1 week.**
+> **Status: v0.1 lint engine and v0.2.1 Claude Code hook are code-complete on `main`. MCP server (v0.2.1 γ) in progress. Not yet on npm — first publish lands with the v0.2.1 release. Use locally via `pnpm link` or a git install for now.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
 
@@ -8,29 +8,36 @@ iris stops the leak before it lands.
 
 ## What it does
 
-iris reads your Tailwind config or `globals.css @theme` block, learns your project's actual tokens, components, and scale, and grounds AI coding assistants in that reality. Three pieces:
+iris reads your Tailwind config or `globals.css @theme` block, learns your project's actual tokens and scale, and grounds AI coding assistants in that reality. Four surfaces, layered on one engine:
 
-- A **CLI** (`npx iris lint`) that flags arbitrary Tailwind values and suggests the correct token. Wraps `eslint-plugin-tailwindcss` and adds full Tailwind v4 `@theme` parsing, semantic rewriting, and a sane allowlist for legitimate arbitrary values like `bg-[url(...)]` and `grid-cols-[1fr_2fr]`.
-- An **MCP server** that injects the resolved token map into Claude Code, Cursor, Windsurf, or Zed before generation, so the AI never has to guess.
-- A **shadcn awareness layer** that surfaces installed components so the AI reuses your `<Button>` instead of inventing a new one.
+- A **CLI** (`npx iris lint`) that flags arbitrary Tailwind values and suggests the correct token. Wraps `eslint-plugin-tailwindcss` and adds full Tailwind v4 `@theme` parsing, semantic rewriting, and a sane allowlist for legitimate arbitrary values like `bg-[url(...)]` and `grid-cols-[1fr_2fr]`. **Shipped.**
+- A **programmatic API** (`import { lintSource } from "iris"`) — the same engine the CLI uses, exposed for adapter code. **Shipped.**
+- A **Claude Code PreToolUse hook** (`iris-hook`) that intercepts Write/Edit/MultiEdit and blocks off-token classes before they hit disk. The block's `reason` payload carries the suggestion, so the AI rewrites the diff in the same turn. **Shipped.**
+- An **MCP server** (`iris-mcp`) exposing the engine as a `lint_source` tool, so editors that speak MCP (Cursor, Windsurf, Zed, Claude Code) can call it on demand. **In progress (v0.2.1 γ).**
 
-Planned output of `npx iris lint app/components/Hero.tsx`:
+A **shadcn awareness layer** that surfaces installed components for the AI to reuse instead of regenerate is the v0.3 target.
+
+Output of `npx iris lint app/components/Hero.tsx`:
 
 ```
 app/components/Hero.tsx
   12:18  error  bg-[#f3f4f6] is not a token. did you mean bg-muted?
-  18:24  error  text-[14px] is off-scale. did you mean text-sm?
-  24:14  warn   reinventing <button>. shadcn/ui already has @/components/ui/button
+  18:24  error  text-[14px] is off-scale. did you mean text-sm? (near match, 1px off)
 
-2 errors, 1 warning. fix with --rewrite to apply suggestions.
+2 errors, 0 warnings
 ```
+
+Run `npx iris lint --fix` to apply suggestions in place. v0.3's shadcn awareness adds a third diagnostic kind — `warn  reinventing <button>. shadcn/ui already has @/components/ui/button` — and is not in the box yet.
 
 ## Roadmap
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.1 | `npx iris lint` CLI — Tailwind v3 + v4 parsing, allowlist, semantic rewriting | in progress |
-| v0.2 | MCP server + Claude Code hook for pre-write token injection | planned |
+| v0.1 | `npx iris lint` CLI — Tailwind v3 + v4 parsing, allowlist, semantic rewriting, `--fix` | shipped to `main` |
+| v0.2.1 α | Public `lintSource` + `IrisLintMessage` contract, `iris/lint` subpath export | shipped to `main` |
+| v0.2.1 β | Claude Code PreToolUse hook (`iris-hook`), example settings + skill | shipped to `main` |
+| v0.2.1 γ | MCP server (`iris-mcp`) for Cursor/Windsurf/Zed/Claude Code | in progress |
+| v0.2.1 δ | npm publish, CHANGELOG, version bump | pending γ |
 | v0.3 | shadcn awareness — detect installed components, steer AI toward reuse | planned |
 
 A Playwright + Vision visual QA loop and an edit-watching taste profile were considered and deferred. See [CLAUDE.md](CLAUDE.md) for the full spec.
@@ -75,11 +82,13 @@ import { lintSource, type IrisLintMessage } from "iris/lint";
 
 ## Claude Code integration
 
-iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before they land. Install iris in the workspace and drop the hook into `.claude/settings.json`:
+iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before they land. Once v0.2.1 publishes, install iris in the workspace and drop the hook into `.claude/settings.json`:
 
 ```bash
 pnpm add -D iris
 ```
+
+> Until npm publish lands, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris` to wire the same `iris-hook` binary.
 
 Project-local config — `.claude/settings.json`:
 
@@ -104,11 +113,21 @@ The example skill at [`examples/claude-code/iris.skill.md`](examples/claude-code
 
 ## Install
 
-Not yet. v0.1 will be `npx iris lint`, published to npm when the parser passes its first real-codebase test. Watch the repo to get a notification.
+Not on npm yet. The first publish lands with v0.2.1 once the MCP server adapter ships and the contract has been smoke-tested in a real Claude Code session.
+
+In the meantime, for hands-on use:
+
+```bash
+git clone https://github.com/FadiBadarni/iris.git
+cd iris && pnpm install && pnpm build
+pnpm link --global   # then `pnpm link --global iris` from your project
+```
+
+That makes `iris`, `iris lint`, and `iris-hook` available in the linked project, including from `.claude/settings.json`.
 
 ## Contributing
 
-Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside v0.1.
+Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside the v0.2.1 npm publish.
 
 ## License
 
