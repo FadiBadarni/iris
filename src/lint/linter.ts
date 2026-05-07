@@ -12,6 +12,11 @@ const linter = new Linter({ configType: "flat" });
 
 // Slice A baseline — runs without a theme. Only no-arbitrary-value, which is
 // regex-based and ignores the resolved Tailwind config entirely.
+//
+// settings.tailwindcss.config is set to an empty object even on this path so
+// the plugin doesn't fall back to its filesystem config-discovery and emit
+// "Cannot resolve default tailwindcss config path..." to stderr — that
+// pollutes CI logs and the future MCP hook's I/O.
 const baseConfig: Linter.FlatConfig[] = [
   {
     files: ["**/*.{ts,tsx,js,jsx,mdx}"],
@@ -28,6 +33,7 @@ const baseConfig: Linter.FlatConfig[] = [
       // biome-ignore lint/suspicious/noExplicitAny: plugin lacks first-class flat-config types in 3.x
       tailwindcss: tailwindPlugin as any,
     },
+    settings: { tailwindcss: { config: {} } },
     rules: {
       "tailwindcss/no-arbitrary-value": "error",
     },
