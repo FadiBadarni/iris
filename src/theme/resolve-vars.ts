@@ -1,6 +1,6 @@
 import type { Root } from "postcss";
 
-const VAR_REF = /var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/;
+const VAR_REF = /var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g;
 const MAX_DEPTH = 8;
 
 /**
@@ -44,51 +44,41 @@ export type ResolveResult = {
 
 /**
  * Resolve `var(--x)` and `var(--x, fallback)` references in `value` against
- * `vars`. Recurses through chained references up to MAX_DEPTH. Replaces the
- * first var() match per pass, then re-runs against the whole value so values
- * with multiple var() refs (e.g. `light-dark(var(--light), var(--dark))`)
- * resolve sequentially.
+ * `vars`. Recurses through chained references depth-first. Each var() ref in
+ * the input is resolved independently, with a per-chain active-path stack
+ * that catches real cycles (--a → --b → --a) without flagging legitimate
+ * reuse like `var(--shadow) 0 1px, var(--shadow) 0 4px` (the same name twice
+ * at the same level is two separate chains, not a cycle).
  */
 export function resolveVarChain(value: string, vars: Map<string, string>): ResolveResult {
   const unresolved = new Set<string>();
-  const visited = new Set<string>();
   let circular = false;
-  let current = value;
 
-  for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
-    const match = current.match(VAR_REF);
-    if (!match) break;
-
-    const varName = match[1] ?? "";
-    const fallback = match[2]?.trim();
-
-    if (visited.has(varName)) {
-      circular = true;
-      break;
-    }
-
-    const lookup = vars.get(varName);
-    if (lookup === undefined) {
-      if (fallback !== undefined && fallback !== "") {
-        current = current.replace(VAR_REF, fallback);
-        continue;
+  const expand = (text: string, activePath: ReadonlyArray<string>, depth: number): string => {
+    if (depth >= MAX_DEPTH) return text;
+    return text.replace(VAR_REF, (_match, varName: string, rawFallback: string | undefined) => {
+      if (activePath.includes(varName)) {
+        circular = true;
+        return `var(${varName})`;
       }
-      unresolved.add(varName);
-      // Remove just this var() ref so we keep scanning the rest of the value.
-      current = current.replace(VAR_REF, `__iris_unresolved__${varName}__`);
-      continue;
-    }
-
-    visited.add(varName);
-    current = current.replace(VAR_REF, lookup);
-  }
-
-  // Restore unresolved markers to their original var() shape so callers see
-  // a value that's still parseable as CSS.
-  current = current.replace(/__iris_unresolved__(--[\w-]+)__/g, "var($1)");
+      const looked = vars.get(varName);
+      if (looked === undefined) {
+        const fallback = rawFallback?.trim();
+        if (fallback) {
+          // The fallback is not "inside" varName (lookup failed) — keep the
+          // active path unchanged so a fallback referencing a name from
+          // higher up doesn't false-trip the cycle detector.
+          return expand(fallback, activePath, depth + 1);
+        }
+        unresolved.add(varName);
+        return `var(${varName})`;
+      }
+      return expand(looked, [...activePath, varName], depth + 1);
+    });
+  };
 
   return {
-    value: current,
+    value: expand(value, [], 0),
     unresolved: [...unresolved],
     circular,
   };

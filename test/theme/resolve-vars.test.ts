@@ -68,4 +68,26 @@ describe("resolveVarChain", () => {
     const r = resolveVarChain("var(--a)", vars);
     expect(r.circular).toBe(true);
   });
+
+  it("does not flag the same var referenced twice as circular", () => {
+    // Box-shadow values commonly use the same color var twice for layered
+    // shadows. Each occurrence is an independent chain, not a cycle.
+    const vars = new Map([["--shadow-color", "rgb(0 0 0 / 0.1)"]]);
+    const r = resolveVarChain("var(--shadow-color) 0 1px, var(--shadow-color) 0 4px", vars);
+    expect(r.value).toBe("rgb(0 0 0 / 0.1) 0 1px, rgb(0 0 0 / 0.1) 0 4px");
+    expect(r.circular).toBe(false);
+  });
+
+  it("does not flag repeated refs in nested chains as circular", () => {
+    // --combo expands to two var(--x) references; --x then expands once.
+    // The second --x in --combo's expansion must not see the first as
+    // already-active.
+    const vars = new Map([
+      ["--x", "red"],
+      ["--combo", "var(--x) var(--x)"],
+    ]);
+    const r = resolveVarChain("var(--combo)", vars);
+    expect(r.value).toBe("red red");
+    expect(r.circular).toBe(false);
+  });
 });
