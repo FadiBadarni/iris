@@ -2,6 +2,52 @@
 
 All notable changes to iris are documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-07
+
+Production-ready: configurability + proactive AI surface. iris now reads an optional `iris.config.ts` for per-rule severity overrides and user-customizable allowlist patterns, and the MCP server gains two new tools (`apply_fix`, `get_token_map`) so the AI can self-correct in one round-trip rather than read+lint+write across three tool calls. Minor bump (not patch) because the public surface grows: new `loadConfig` / `defineConfig` exports, new `IrisConfig` / `IrisRuleSeverity` types, a fifth optional argument on `lintSource`, and two new MCP tools. The existing `lintSource(source, filename, theme?, shadcn?)` signature stays valid — v0.3 users get no surprises if they don't opt in.
+
+### Added
+
+- **`iris.config.ts` loader** (slice α). Drop an `iris.config.{ts,mjs,js}` at the project root and the CLI, hook, and MCP server all pick it up. Two knobs on day one: `rules` (per-rule severity overrides — `"off"` / `"warn"` / `"error"`) and `allowlist` (extra regex patterns appended to `DEFAULT_ALLOWLIST`, accepting either string patterns or RegExp instances). `defineConfig` is an identity helper for type inference, same shape as Vite/Vitest/Tailwind. Loader uses jiti 2.x with `interopDefault` for first-class TypeScript configs.
+- **`apply_fix` MCP tool** (slice β). `apply_fix({ source, filename, projectRoot? }) → { source, applied, remaining }`. Server-side equivalent of `iris lint --fix` — submit a draft, get rewritten source back. The `remaining` field carries violations the engine had no fix for (ambiguous matches, no token match, or warning-only rules like `iris/no-reinventing-shadcn`). The handler re-lints the rewritten source so `remaining` carries post-fix line/column positions.
+- **`get_token_map` MCP tool** (slice γ). `get_token_map({ projectRoot? }) → { tokens: TokenEntry[] }`. Mirrors `list_components` for the theme — proactive AI query for "what tokens exist?" so the AI reaches for project tokens instead of arbitrary values. Returns the full `TokenEntry` shape (`{ name, value, type, source, file }`) for every resolved token, including v4 defaults; `source` lets a consumer filter by origin if they want only project-defined entries.
+- **`lintSource` accepts a fifth optional `config?: IrisConfig` argument.** When provided, severity overrides apply post-rule (rewriting `msg.severity` or dropping the message when `"off"`) and allowlist additions extend `DEFAULT_ALLOWLIST` for the same lint pass.
+- **CLI / hook / MCP auto-load `iris.config.*`.** `npx iris lint`, `iris-hook`, and `iris-mcp` all call `loadConfig` for the inferred project root and thread it through. CLI exits 2 on a malformed config (the user invoked the linter intentionally; loud failure is correct). Hook + MCP swallow + log to stderr and fall back to defaults so a typo doesn't freeze every Claude Code tool call.
+- **`examples/iris.config.ts`** — copy-paste-ready `defineConfig({...})` example with both knobs and inline comments. README has a new "Configuration" section linking it.
+
+### Changed
+
+- **`createIrisMcpServer` `CreateServerOpts`.** New optional `resolveConfig` injection paralleling `resolveShadcn`. Errors are swallowed on the lint and apply paths (a flaky config resolver shouldn't break linting).
+- **`ResolveTheme` signature.** `filename` is now optional, parallel to `ResolveShadcn`. `get_token_map` has no file context to anchor on; `lint_source` and `apply_fix` still pass it for project-root inference.
+- **MCP daemon staleness fix.** Replaced the resolved-value caches for theme and shadcn with in-flight promise coalescing keyed by project root. The previous outer cache held a parsed `ResolvedTheme` forever and bypassed `parseTheme`'s mtime cache (`src/theme/cache.ts`), so editing `tailwind.config.*` or adding a new shadcn component wouldn't surface until daemon restart. Coalescing dedups concurrent calls; settle deletes the entry; next call hits `parseTheme` / `parseShadcn` fresh.
+- **Loader runtime validation.** `loadConfig` now rejects malformed configs at startup rather than silently no-opping mid-lint: invalid severity strings (`"warning"` instead of `"warn"`), non-array `allowlist`, non-string/RegExp items, malformed regex patterns. The CLI surfaces these and exits 2.
+- **`g`/`y` flags stripped on user RegExps.** `RegExp.prototype.test` carries `lastIndex` state for global / sticky regexes, so a stateful pattern would alternate between matching and missing on repeated calls. `combineAllowlist` now clones user RegExps without those flags.
+- **Severity overrides key against the raw ESLint `ruleId`.** `toIrisMessage` defaults a missing `ruleId` to `"unknown"` for presentation. Without the fix, `rules: { "unknown": "off" }` would have silenced every parser/internal diagnostic ESLint emits without a ruleId.
+- **Embedded MCP server identity.** `Server({ name: "iris", version: "0.3.0" })` → `"0.4.0"` so `tools/list` responses advertise the right version.
+- **README expanded.** New "Configuration" section between "MCP server" and "shadcn awareness". The MCP server section now lists all four tools with their input/output shapes. Roadmap split. Stale v0.3.0 references throughout updated.
+- **MCP example configs corrected.** `examples/mcp/{claude-code,cursor}.json` now use `npx -y -p iris-cc iris-mcp` so npx can resolve the bin without a project-local install. Previously `npx -y iris-mcp` failed because npm has no `iris-mcp` package; the bin lives in `iris-cc`.
+
+### Risks
+
+- **`iris.config.*` is project-root only.** No per-directory configs, no `extends`, no JSON. All additive on the existing shape if real demand surfaces.
+- **No way to remove default allowlist patterns.** Users can append, not subtract. Trade for the simpler day-one shape.
+- **Sticky-null config cache in the MCP daemon.** Broken configs cache as `null` so a daemon doesn't pound the FS on every tool call; fixing the config requires daemon restart for the MCP surface (CLI / hook re-load every invocation).
+
+### Dependencies
+
+- `jiti@^2.7.0` (new runtime dep). 1 MB. Used by the config loader to load TS/MJS/JS configs without a build step. ESM-first, used by Vite/Nuxt — proven shape.
+
+### Deferred to v0.5+
+
+- Persistent hook process for sub-200ms cold-start (architectural; current is 450–570ms — over the CLAUDE.md budget by >2x but not a blocker users have surfaced yet)
+- Theme file watcher (carry-over)
+- `add_component` MCP tool (shells `npx shadcn add`)
+- Structural similarity matching for the shadcn rule
+- Detection of non-shadcn libraries (Radix, Headless UI)
+- The shadcn-aware `--fix` rewriter that imports the canonical component
+- Visual QA Phase 2 (Playwright + axe-core, gated on user demand)
+- Adoption telemetry
+
 ## [0.3.0] — 2026-05-07
 
 shadcn awareness. iris now detects installed shadcn/ui components, flags reinvented locals, and exposes the component list to AI assistants over MCP. Minor bump (not patch) because the public surface grows: new `parseShadcn` export, new `ShadcnState`/`ShadcnComponent`/`ShadcnWarning` types, a fourth optional argument on `lintSource`, and a second MCP tool. The existing `lintSource(source, filename, theme?)` signature stays valid — v0.2.x users get no surprises if they don't opt in.
