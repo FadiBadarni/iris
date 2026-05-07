@@ -1,6 +1,6 @@
 # iris
 
-> **Status: v0.3.0 is cut and tagged on `main` — lint engine, Claude Code hook, MCP server (`lint_source` + `list_components`), and shadcn awareness all ship. The npm publish is the only remaining step; until then, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.**
+> **Status: v0.3.0 is tagged on `main`; v0.4 is in progress — `iris.config.ts` user customization, plus `apply_fix` and `get_token_map` MCP tools have landed. The npm publish lands once v0.4 ε cuts; until then, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
 
@@ -8,13 +8,14 @@ iris stops the leak before it lands.
 
 ## What it does
 
-iris reads your Tailwind config or `globals.css @theme` block, learns your project's actual tokens and scale, and grounds AI coding assistants in that reality. Five surfaces, layered on one engine:
+iris reads your Tailwind config or `globals.css @theme` block, learns your project's actual tokens and scale, and grounds AI coding assistants in that reality. Six surfaces, layered on one engine:
 
 - A **CLI** (`npx iris lint`) that flags arbitrary Tailwind values and suggests the correct token. Wraps `eslint-plugin-tailwindcss` and adds full Tailwind v4 `@theme` parsing, semantic rewriting, and a sane allowlist for legitimate arbitrary values like `bg-[url(...)]` and `grid-cols-[1fr_2fr]`. **Shipped.**
 - A **programmatic API** (`import { lintSource } from "iris-cc"`) — the same engine the CLI uses, exposed for adapter code. **Shipped.**
 - A **Claude Code PreToolUse hook** (`iris-hook`) that intercepts Write/Edit/MultiEdit and blocks off-token classes before they hit disk. The block's `reason` payload carries the suggestion, so the AI rewrites the diff in the same turn. **Shipped.**
-- An **MCP server** (`iris-mcp`) exposing the engine as `lint_source` and `list_components` tools, so editors that speak MCP (Cursor, Windsurf, Zed, Claude Code) can call them on demand. **Shipped.**
+- An **MCP server** (`iris-mcp`) exposing the engine as four tools — `lint_source`, `list_components`, `apply_fix`, `get_token_map` — so editors that speak MCP (Cursor, Windsurf, Zed, Claude Code) can call them on demand. **Shipped.**
 - A **shadcn awareness layer** that detects installed shadcn/ui components, flags reinvented locals (`function Button() {...}` when `@/components/ui/button` already exists), and exposes the component list to the AI via MCP. **Shipped in v0.3.0.**
+- An **`iris.config.ts`** at the project root with per-rule severity overrides (`off` / `warn` / `error`) and user-customizable allowlist patterns. Same file picked up by the CLI, hook, and MCP server. **Shipped in v0.4.**
 
 Output of `npx iris lint app/components/Hero.tsx`:
 
@@ -41,7 +42,10 @@ app/components/Hero.tsx
 | v0.2.1 | Public `lintSource` contract, `iris-hook` (PreToolUse), `iris-mcp` (`lint_source` tool) | shipped to `main` |
 | v0.2.2 | OKLab near-match suggestions, `--fix` git-state safety | shipped to `main` |
 | v0.3.0 | shadcn awareness — `parseShadcn`, `iris/no-reinventing-shadcn` rule, `list_components` MCP tool | tagged on `main` |
-| v0.3.0 publish | First npm release | next |
+| v0.4 α | `iris.config.ts` loader — per-rule severity overrides + user-customizable allowlist | shipped to `main` |
+| v0.4 β | `apply_fix` MCP tool — server-side rewrite of exact + near suggestions | shipped to `main` |
+| v0.4 γ | `get_token_map` MCP tool — proactive token discovery | shipped to `main` |
+| v0.4 δ/ε | Docs + first npm release | in progress |
 
 A Playwright + Vision visual QA loop and an edit-watching taste profile were considered and deferred. See [CLAUDE.md](CLAUDE.md) for the full spec.
 
@@ -95,7 +99,7 @@ iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before 
 pnpm add -D iris-cc
 ```
 
-The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`) match the project name unchanged. Until v0.3.0 publishes you can install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.
+The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`) match the project name unchanged. Until v0.4.0 publishes you can install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.
 
 Project-local config — `.claude/settings.json`:
 
@@ -120,10 +124,12 @@ The example skill at [`examples/claude-code/iris.skill.md`](examples/claude-code
 
 ## MCP server
 
-`iris-mcp` exposes the engine over MCP so any compatible editor can call it on demand. Two tools ship today:
+`iris-mcp` exposes the engine over MCP so any compatible editor can call it on demand. Four tools ship today:
 
 - `lint_source(source, filename, projectRoot?) → { violations: IrisLintMessage[] }` — the same lint pass the CLI runs, callable mid-reasoning. The hook is the hard gate during writes; this tool is what an AI calls *while planning* a Tailwind change.
+- `apply_fix(source, filename, projectRoot?) → { source, applied, remaining }` — lint plus a server-side rewrite of every exact + near match suggestion. The AI submits a draft, gets corrected source back, and continues without round-tripping through the file system. `remaining` carries violations the engine had no fix for (ambiguous, no token match, or warning-only rules like `iris/no-reinventing-shadcn`).
 - `list_components(projectRoot?) → { components: ShadcnComponent[] }` — the project's installed shadcn/ui components, each with `{ name, filePath, importPath }`. Lets the AI discover what's already imported and reach for it instead of generating a fresh `<Button>`.
+- `get_token_map(projectRoot?) → { tokens: TokenEntry[] }` — every resolved Tailwind token, each with `{ name, value, type, source, file }`. Call before generating Tailwind classes so the AI reaches for project tokens instead of arbitrary values.
 
 Claude Code — `~/.claude/mcp.json` or `.claude/mcp.json`:
 
@@ -132,15 +138,45 @@ Claude Code — `~/.claude/mcp.json` or `.claude/mcp.json`:
   "mcpServers": {
     "iris": {
       "command": "npx",
-      "args": ["-y", "iris-mcp"]
+      "args": ["-y", "-p", "iris-cc", "iris-mcp"]
     }
   }
 }
 ```
 
+The `-p iris-cc` is required because the npm package is `iris-cc` while the bin is `iris-mcp` — npx needs both names to resolve a global install. If `iris-cc` is already a project-local devDependency, `["-y", "iris-mcp"]` is enough since npx finds the bin in `node_modules`.
+
 Cursor uses `~/.cursor/mcp.json` (or `.cursor/mcp.json`); Windsurf and Zed accept the same shape. Examples live under [`examples/mcp/`](examples/mcp/).
 
-Both tools return `content` (a JSON-encoded text block) and `structuredContent` for clients that index structured fields. Engine failures on `lint_source` (no Tailwind project, parser crash) surface as `isError: true` with an actionable message. `list_components` answers cleanly with `components: []` on non-shadcn projects rather than failing — the AI gets a clear "no components" signal and falls through to default JSX generation.
+All four tools return both `content` (a JSON-encoded text block) and `structuredContent` for clients that index structured fields. The two write-shaped tools (`lint_source`, `apply_fix`) surface engine failures as `isError: true` so the AI sees actionable error messages. The two discovery tools (`list_components`, `get_token_map`) answer cleanly with empty arrays on projects that don't have the relevant install — the AI gets a "nothing here" signal and falls through to defaults rather than failing.
+
+## Configuration
+
+Drop an `iris.config.ts` (or `.mjs` / `.js`) at the project root. The CLI, hook, and MCP server all pick it up automatically — same file, three surfaces. A copy-paste-ready example lives at [`examples/iris.config.ts`](examples/iris.config.ts).
+
+```ts
+import { defineConfig } from "iris-cc";
+
+export default defineConfig({
+  rules: {
+    "iris/no-reinventing-shadcn": "error",   // promote warning to a hard hook block
+    "tailwindcss/no-arbitrary-value": "off", // silence end-to-end
+  },
+  allowlist: [
+    "^bg-\\[hsl\\(",         // string pattern, compiled with new RegExp(...)
+    /^text-\[var\(--app-/,   // RegExp literal works too
+  ],
+});
+```
+
+**Two knobs today:**
+
+- **`rules`.** Per-rule severity overrides keyed by exact `IrisLintMessage.ruleId`. `"off"` silences a rule end-to-end. `"warn"` demotes an error so the hook stops blocking but the lint output still surfaces it. `"error"` promotes a warning so the hook *does* block. The loader rejects unknown severity strings (`"warning"` instead of `"warn"`, etc.) at startup rather than silently no-opping mid-lint.
+- **`allowlist`.** Extra patterns appended to iris's `DEFAULT_ALLOWLIST`. Strings are compiled with `new RegExp(...)`; pass a literal RegExp if you want flag control. The `g` and `y` flags are stripped on user patterns since `RegExp.prototype.test` would otherwise carry `lastIndex` state between calls and let an allowlisted class leak on alternating matches.
+
+**Surface posture.** The CLI surfaces config errors and exits 2 — broken config is fixable, the user invoked the linter intentionally and should see why. The hook and MCP swallow + log to stderr, falling back to defaults so a typo in `iris.config.ts` doesn't freeze every Claude Code tool call. Programmatic callers using `lintSource` directly can pass an `IrisConfig` as the fifth arg or skip it entirely; v0.3 behavior is preserved when the arg is omitted.
+
+**Limitations today.** No way to *remove* a default allowlist pattern (only append). No `extends` for shared configs across a monorepo. No per-directory configs — project root only. All of these are additive knobs on the existing shape if real demand surfaces.
 
 ## shadcn awareness
 
@@ -160,25 +196,25 @@ Severity is `warning` end-to-end. The lint CLI surfaces shadcn warnings; the Cla
 
 **Monorepos.** When more than one `**/components/ui` directory is found and there's no `components.json` to disambiguate, the shallowest dir wins (depth-first, then lexicographic). Others surface as a `multi-shadcn` warning (`iris warn [multi-shadcn]: ...` from the CLI). Pass `projectRoot` to the MCP tool, or run iris from the package's directory, to scope detection to a single workspace.
 
-**Opt-out.** Today there's no CLI/hook/MCP flag to disable shadcn detection — auto-wired everywhere a `components/ui/` directory or `components.json` is found. Programmatic callers can opt out by simply omitting the fourth `lintSource` argument. A config-driven opt-out can land in v0.4 if there's demand.
+**Opt-out.** v0.4 added a config-driven knob: drop `rules: { "iris/no-reinventing-shadcn": "off" }` into `iris.config.ts` (see [Configuration](#configuration)) and the rule disappears end-to-end. Detection itself still runs (used by `list_components` regardless), but the lint pass stays silent. Programmatic callers using `lintSource` directly can also opt out by omitting the fourth argument.
 
 ## Install
 
-Not on npm yet — v0.3.0 is cut and tagged locally; the first publish lands once the contract has been smoke-tested in a real Claude Code session.
+Not on npm yet — v0.4 is rolling on `main` (α/β/γ landed; δ/ε pending). The first publish lands when v0.4 ε cuts.
 
 In the meantime, for hands-on use:
 
 ```bash
 git clone https://github.com/FadiBadarni/iris.git
 cd iris && pnpm install && pnpm build
-pnpm link --global   # then `pnpm link --global iris` from your project
+pnpm link --global   # then `pnpm link --global iris-cc` from your project
 ```
 
 That makes `iris`, `iris lint`, and `iris-hook` available in the linked project, including from `.claude/settings.json`.
 
 ## Contributing
 
-Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside the v0.3.0 npm publish.
+Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside the v0.4.0 npm publish.
 
 ## License
 

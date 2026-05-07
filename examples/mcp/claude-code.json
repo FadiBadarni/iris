@@ -1,9 +1,9 @@
 {
-  "_comment": "Drop into ~/.claude/mcp.json (global) or .claude/mcp.json (project). Requires `iris` installed in the workspace so npx can resolve iris-mcp from node_modules.",
+  "_comment": "Drop into ~/.claude/mcp.json (global) or .claude/mcp.json (project). The `-p iris-cc` tells npx that the bin `iris-mcp` lives in the `iris-cc` package; without it, npx would search npm for a package named `iris-mcp` and fail. If iris-cc is already a project-local devDependency, the `-p iris-cc` part is redundant — npx finds the bin in node_modules.",
   "mcpServers": {
     "iris": {
       "command": "npx",
-      "args": ["-y", "iris-mcp"]
+      "args": ["-y", "-p", "iris-cc", "iris-mcp"]
     }
   }
 }

@@ -1,9 +1,9 @@
 {
-  "_comment": "Cursor uses ~/.cursor/mcp.json (global) or .cursor/mcp.json (project). Same shape as Claude Code's mcp.json.",
+  "_comment": "Cursor uses ~/.cursor/mcp.json (global) or .cursor/mcp.json (project). Same shape as Claude Code's mcp.json. The `-p iris-cc` tells npx that the bin `iris-mcp` lives in the `iris-cc` package.",
   "mcpServers": {
     "iris": {
       "command": "npx",
-      "args": ["-y", "iris-mcp"]
+      "args": ["-y", "-p", "iris-cc", "iris-mcp"]
     }
   }
 }
