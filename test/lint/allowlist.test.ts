@@ -17,6 +17,10 @@ describe("isAllowlisted with DEFAULT_ALLOWLIST", () => {
     ['content-["→"]', true, "content with character"],
     ["content-[attr(data-text)]", true, "content with attr()"],
     ["[mask-image:url(/m.svg)]", true, "arbitrary property mask-image"],
+    ["[mask-size:auto]", true, "arbitrary property mask-size"],
+    ["[content-visibility:auto]", true, "arbitrary property content-visibility"],
+    ["[grid-template-columns:1fr_2fr]", true, "arbitrary property grid-template-columns"],
+    ["[font-feature-settings:'cv11']", true, "arbitrary property font-feature-settings"],
     ["text-[var(--font-size)]", true, "broad: anything with var(--*) is allowed"],
   ])("allows %s — %s", (cls, expected) => {
     expect(isAllowlisted(cls, DEFAULT_ALLOWLIST)).toBe(expected);

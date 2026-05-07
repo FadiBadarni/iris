@@ -33,9 +33,13 @@ export const DEFAULT_ALLOWLIST: AllowlistPattern[] = [
   // specific and don't belong in the spacing/color scale.
   /^clip-path-\[/,
 
-  // Arbitrary property: `[mask-image:...]`. The bracket-prefix shape signals
-  // a CSS property the project is intentionally setting at the utility level.
-  /^\[mask-image:/,
+  // Arbitrary properties: `[mask-image:...]`, `[mask-size:auto]`,
+  // `[content-visibility:auto]`, `[grid-template-columns:1fr_2fr]`,
+  // `[font-feature-settings:'cv11']`, etc. The bracket-prefixed `property:`
+  // shape signals an intentional CSS-property assignment at the utility
+  // level — these classes don't have token equivalents and should never be
+  // rewritten.
+  /^\[[a-z-]+:/,
 ];
 
 export function isAllowlisted(className: string, patterns: AllowlistPattern[]): boolean {
