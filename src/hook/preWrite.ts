@@ -7,6 +7,7 @@
 import { formatHuman } from "../lint/format.js";
 import { lintSource } from "../lint/linter.js";
 import type { IrisLintMessage } from "../lint/types.js";
+import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
 
 export type HookEvent =
@@ -33,13 +34,17 @@ export type HookDecision = { decision: "block"; reason: string } | null;
 // positives if a tool author added Tailwind-shaped strings to a config.
 const JSX_LIKE = /\.(tsx|jsx|mdx)$/i;
 
-export async function preWrite(event: HookEvent, theme: ResolvedTheme): Promise<HookDecision> {
+export async function preWrite(
+  event: HookEvent,
+  theme: ResolvedTheme,
+  shadcn?: ShadcnState,
+): Promise<HookDecision> {
   if (!JSX_LIKE.test(event.tool_input.file_path)) return null;
 
   const source = extractSource(event);
   if (!source) return null;
 
-  const messages = await lintSource(source, event.tool_input.file_path, theme);
+  const messages = await lintSource(source, event.tool_input.file_path, theme, shadcn);
   if (messages.length === 0) return null;
 
   // Only error-severity blocks. Warnings (no-custom-classname today, more

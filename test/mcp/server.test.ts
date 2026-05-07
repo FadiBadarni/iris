@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, test } from "vitest";
-import { createIrisMcpServer } from "../../src/mcp/server.js";
+import { type ResolveShadcn, createIrisMcpServer } from "../../src/mcp/server.js";
+import type { ShadcnState } from "../../src/shadcn/types.js";
 import type { ResolvedTheme, TokenEntry } from "../../src/theme/types.js";
 
 function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>): ResolvedTheme {
@@ -17,14 +18,19 @@ function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>):
   return { version: 4, tokens, byValue, sources: ["test.css"], warnings: [] };
 }
 
-async function pairedClient(theme: ResolvedTheme | (() => Promise<never>)): Promise<{
+async function pairedClient(
+  theme: ResolvedTheme | (() => Promise<never>),
+  resolveShadcn?: ResolveShadcn,
+): Promise<{
   client: Client;
   cleanup: () => Promise<void>;
 }> {
   const resolveTheme =
     typeof theme === "function" ? theme : async (): Promise<ResolvedTheme> => theme;
 
-  const server = createIrisMcpServer({ resolveTheme });
+  const server = createIrisMcpServer(
+    resolveShadcn ? { resolveTheme, resolveShadcn } : { resolveTheme },
+  );
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "iris-test-client", version: "0.0.0" });
 
@@ -133,6 +139,62 @@ describe("iris MCP server", () => {
       });
       const sc = (result as { structuredContent?: { violations: unknown[] } }).structuredContent;
       expect(sc?.violations).toHaveLength(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("lint_source surfaces no-reinventing-shadcn when resolveShadcn is mounted", async () => {
+    const shadcn: ShadcnState = {
+      components: new Map([
+        [
+          "Button",
+          {
+            name: "Button",
+            filePath: "/proj/components/ui/button.tsx",
+            importPath: "@/components/ui/button",
+          },
+        ],
+      ]),
+      warnings: [],
+    };
+    const { client, cleanup } = await pairedClient(fakeTheme([]), async () => shadcn);
+    try {
+      const result = await client.callTool({
+        name: "lint_source",
+        arguments: {
+          source: "export function Button() { return <button />; }",
+          filename: "Hero.tsx",
+        },
+      });
+      const sc = (
+        result as { structuredContent?: { violations: Array<{ ruleId: string; message: string }> } }
+      ).structuredContent;
+      const reinventing = sc?.violations.find((v) => v.ruleId === "iris/no-reinventing-shadcn");
+      expect(reinventing).toBeDefined();
+      expect(reinventing?.message).toContain("@/components/ui/button");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("lint_source falls back to no-shadcn path when resolveShadcn throws", async () => {
+    // A flaky shadcn detector should never break the lint path. The server
+    // catches the throw and continues without a ShadcnState.
+    const { client, cleanup } = await pairedClient(fakeTheme([]), async () => {
+      throw new Error("shadcn detector exploded");
+    });
+    try {
+      const result = await client.callTool({
+        name: "lint_source",
+        arguments: {
+          source: "export function Button() { return <button />; }",
+          filename: "Hero.tsx",
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      const sc = (result as { structuredContent?: { violations: unknown[] } }).structuredContent;
+      expect(sc?.violations).toEqual([]);
     } finally {
       await cleanup();
     }

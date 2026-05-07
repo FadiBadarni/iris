@@ -13,15 +13,7 @@
   "bugs": {
     "url": "https://github.com/FadiBadarni/iris/issues"
   },
-  "keywords": [
-    "tailwindcss",
-    "claude-code",
-    "mcp",
-    "design-tokens",
-    "linter",
-    "shadcn",
-    "nextjs"
-  ],
+  "keywords": ["tailwindcss", "claude-code", "mcp", "design-tokens", "linter", "shadcn", "nextjs"],
   "engines": {
     "node": ">=18.18"
   },
@@ -43,13 +35,7 @@
       "import": "./dist/lint/index.js"
     }
   },
-  "files": [
-    "dist",
-    "examples",
-    "CHANGELOG.md",
-    "README.md",
-    "LICENSE"
-  ],
+  "files": ["dist", "examples", "CHANGELOG.md", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

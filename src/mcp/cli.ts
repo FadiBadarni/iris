@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { parseTheme } from "../index.js";
+import { parseShadcn } from "../shadcn/detect.js";
+import type { ShadcnState } from "../shadcn/types.js";
 import { createIrisMcpServer } from "./server.js";
 
 const require = createRequire(import.meta.url);
@@ -10,6 +12,7 @@ const require = createRequire(import.meta.url);
 async function main(): Promise<void> {
   const startupCwd = process.cwd();
   const themeCache = new Map<string, Awaited<ReturnType<typeof parseTheme>>>();
+  const shadcnCache = new Map<string, ShadcnState>();
 
   const server = createIrisMcpServer({
     resolveTheme: async (filename, projectRoot) => {
@@ -23,6 +26,18 @@ async function main(): Promise<void> {
       const theme = await parseTheme({ cwd: root });
       themeCache.set(key, theme);
       return theme;
+    },
+    resolveShadcn: async (filename, projectRoot) => {
+      const root = resolveProjectRoot(filename, projectRoot, startupCwd);
+      const key = cacheKey(root);
+      const cached = shadcnCache.get(key);
+      if (cached) return cached;
+      // parseShadcn does its own filesystem walk on every call — cheap
+      // enough that not bothering with mtime invalidation, but expensive
+      // enough that a daemon-level cache by root pays off across calls.
+      const shadcn = await parseShadcn({ cwd: root });
+      shadcnCache.set(key, shadcn);
+      return shadcn;
     },
   });
 

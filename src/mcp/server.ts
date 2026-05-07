@@ -12,12 +12,23 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { lintSource } from "../lint/linter.js";
+import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
 
 export type ResolveTheme = (filename: string, projectRoot?: string) => Promise<ResolvedTheme>;
 
+// Optional injection. Returning undefined is a valid signal that this
+// project doesn't have a shadcn install — the linter just skips the rule.
+// Errors are swallowed at the call site so a flaky shadcn detector never
+// breaks the lint path.
+export type ResolveShadcn = (
+  filename: string,
+  projectRoot?: string,
+) => Promise<ShadcnState | undefined>;
+
 export type CreateServerOpts = {
   resolveTheme: ResolveTheme;
+  resolveShadcn?: ResolveShadcn;
 };
 
 const TOOL_NAME = "lint_source";
@@ -87,9 +98,21 @@ export function createIrisMcpServer(opts: CreateServerOpts): Server {
       return errorResult(`iris: ${msg}`);
     }
 
+    // Shadcn detection is best-effort: a thrown resolver or absent
+    // injection just falls back to the no-shadcn path. Lint should
+    // never fail because shadcn went sideways.
+    let shadcn: ShadcnState | undefined;
+    if (opts.resolveShadcn) {
+      try {
+        shadcn = await opts.resolveShadcn(args.filename, projectRoot);
+      } catch {
+        shadcn = undefined;
+      }
+    }
+
     let messages: Awaited<ReturnType<typeof lintSource>>;
     try {
-      messages = await lintSource(args.source, args.filename, theme);
+      messages = await lintSource(args.source, args.filename, theme, shadcn);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return errorResult(`iris: lintSource failed for ${args.filename}: ${msg}`);

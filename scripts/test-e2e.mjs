@@ -2,7 +2,6 @@
 // e2e suite with IRIS_E2E=1 set in the child env. Avoids a cross-env dep.
 import { spawnSync } from "node:child_process";
 
-
 function run(commandLine, env) {
   // shell: true with a single command string keeps Windows + POSIX both happy
   // and avoids node's DEP0190 (args + shell: true).

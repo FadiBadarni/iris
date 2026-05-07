@@ -2,6 +2,7 @@
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { parseTheme } from "../index.js";
+import { parseShadcn } from "../shadcn/detect.js";
 import { type HookEvent, preWrite } from "./preWrite.js";
 
 const require = createRequire(import.meta.url);
@@ -44,7 +45,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const decision = await preWrite(event, theme);
+  // parseShadcn never throws — projects without shadcn return an empty
+  // components Map plus a `no-shadcn` warning we silently ignore here.
+  // The hook should never fail because shadcn is missing.
+  const shadcn = await parseShadcn({ cwd });
+
+  const decision = await preWrite(event, theme, shadcn);
   if (decision !== null) {
     process.stdout.write(JSON.stringify(decision));
   }

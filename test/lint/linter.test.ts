@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { lintSource } from "../../src/lint/linter.js";
+import type { ShadcnState } from "../../src/shadcn/types.js";
 import type { ResolvedTheme, TokenEntry } from "../../src/theme/types.js";
+
+function fakeShadcn(
+  entries: Array<{ name: string; filePath: string; importPath: string }>,
+): ShadcnState {
+  return { components: new Map(entries.map((e) => [e.name, e])), warnings: [] };
+}
 
 function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>): ResolvedTheme {
   const tokens = new Map<string, TokenEntry>();
@@ -156,5 +163,45 @@ describe("lintSource — slice C.2 no-custom-classname", () => {
     expect(customClassMessage?.message).toBe(
       "Classname 'bg-foo-not-a-real-token' is not a Tailwind CSS class!",
     );
+  });
+});
+
+describe("lintSource — slice β.2 shadcn awareness", () => {
+  const buttonComponent = {
+    name: "Button",
+    filePath: "/proj/components/ui/button.tsx",
+    importPath: "@/components/ui/button",
+  };
+  const shadcn = fakeShadcn([buttonComponent]);
+
+  test("fires no-reinventing-shadcn when shadcn is provided", async () => {
+    const source = "export function Button() { return <button />; }";
+    const messages = await lintSource(source, "Hero.tsx", undefined, shadcn);
+    const reinventing = messages.filter((m) => m.ruleId === "iris/no-reinventing-shadcn");
+    expect(reinventing).toHaveLength(1);
+    expect(reinventing[0]?.severity).toBe("warning");
+    expect(reinventing[0]?.message).toContain("@/components/ui/button");
+  });
+
+  test("does NOT fire when shadcn is omitted (back-compat)", async () => {
+    const source = "export function Button() { return <button />; }";
+    const messages = await lintSource(source, "Hero.tsx");
+    expect(messages).toEqual([]);
+  });
+
+  test("does NOT fire on the canonical shadcn file itself", async () => {
+    const source = "export function Button() { return <button />; }";
+    const messages = await lintSource(source, "/proj/components/ui/button.tsx", undefined, shadcn);
+    expect(messages).toEqual([]);
+  });
+
+  test("composes with theme — both rule layers fire", async () => {
+    const theme = fakeTheme([{ name: "colors.muted", value: "#f3f4f6", type: "color" }]);
+    const source = `export function Button() {
+      return <button className="bg-[#abc]" />;
+    }`;
+    const messages = await lintSource(source, "Hero.tsx", theme, shadcn);
+    expect(messages.some((m) => m.ruleId === "iris/no-reinventing-shadcn")).toBe(true);
+    expect(messages.some((m) => m.ruleId === "tailwindcss/no-arbitrary-value")).toBe(true);
   });
 });

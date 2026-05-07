@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { preWrite } from "../../src/hook/preWrite.js";
+import type { ShadcnState } from "../../src/shadcn/types.js";
 import type { ResolvedTheme, TokenEntry } from "../../src/theme/types.js";
 
 function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>): ResolvedTheme {
@@ -103,6 +104,38 @@ describe("preWrite hook", () => {
         },
       },
       theme,
+    );
+    expect(result).toBeNull();
+  });
+
+  test("does NOT block on a shadcn reinvention (warning severity)", async () => {
+    // Slice β.2 wires shadcn through to lintSource. The hook deliberately
+    // doesn't block warnings; this guards against an accidental severity
+    // bump turning a coaching nudge into a hard stop.
+    const theme = fakeTheme([]);
+    const shadcn: ShadcnState = {
+      components: new Map([
+        [
+          "Button",
+          {
+            name: "Button",
+            filePath: "/proj/components/ui/button.tsx",
+            importPath: "@/components/ui/button",
+          },
+        ],
+      ]),
+      warnings: [],
+    };
+    const result = await preWrite(
+      {
+        tool_name: "Write",
+        tool_input: {
+          file_path: "Hero.tsx",
+          content: "export function Button() { return <button />; }",
+        },
+      },
+      theme,
+      shadcn,
     );
     expect(result).toBeNull();
   });

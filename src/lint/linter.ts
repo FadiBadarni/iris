@@ -2,11 +2,13 @@ import { basename } from "node:path";
 import tsParser from "@typescript-eslint/parser";
 import { Linter } from "eslint";
 import tailwindPlugin from "eslint-plugin-tailwindcss";
+import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
 import { DEFAULT_ALLOWLIST, isAllowlisted } from "./allowlist.js";
 import { synthesizeV3Config } from "./config-synth.js";
 import { extractClassFromMessage } from "./extract.js";
 import { suggestToken } from "./rewrite.js";
+import { noReinventingShadcn } from "./rules/no-reinventing-shadcn.js";
 import type { IrisLintMessage } from "./types.js";
 
 const linter = new Linter({ configType: "flat" });
@@ -70,12 +72,36 @@ function configFor(theme: ResolvedTheme): Linter.FlatConfig[] {
   return cfg;
 }
 
+// Slice β.2 path — when a ShadcnState is provided, layer in
+// iris/no-reinventing-shadcn as an independent flat-config entry. The rule
+// is theme-orthogonal (it only consults the AST + the ShadcnState), so it
+// composes cleanly with both the base and themed configs by being appended
+// rather than merged into the existing entry.
+const shadcnLayerCache = new WeakMap<ShadcnState, Linter.FlatConfig>();
+
+function shadcnLayer(shadcn: ShadcnState): Linter.FlatConfig {
+  const cached = shadcnLayerCache.get(shadcn);
+  if (cached !== undefined) return cached;
+  const layer: Linter.FlatConfig = {
+    files: ["**/*.{ts,tsx,js,jsx,mdx}", "*.{ts,tsx,js,jsx,mdx}"],
+    plugins: {
+      // biome-ignore lint/suspicious/noExplicitAny: rule-shape interop
+      iris: { rules: { "no-reinventing-shadcn": noReinventingShadcn(shadcn) } } as any,
+    },
+    rules: { "iris/no-reinventing-shadcn": "warn" },
+  };
+  shadcnLayerCache.set(shadcn, layer);
+  return layer;
+}
+
 export async function lintSource(
   source: string,
   filename: string,
   theme?: ResolvedTheme,
+  shadcn?: ShadcnState,
 ): Promise<IrisLintMessage[]> {
-  const cfg = theme === undefined ? baseConfig : configFor(theme);
+  const baseLayers = theme === undefined ? baseConfig : configFor(theme);
+  const cfg = shadcn === undefined ? baseLayers : [...baseLayers, shadcnLayer(shadcn)];
   // Two-channel filename: `filename` is the basename so ESLint's
   // flat-config glob (`**/*.{ts,tsx,…}`) engages even for Windows-absolute
   // paths with drive letters that the glob can't match. `physicalFilename`

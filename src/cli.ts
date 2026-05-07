@@ -8,6 +8,7 @@ import { applyFixes } from "./lint/fix.js";
 import { type FileResult, formatHuman, formatJson, formatSarif } from "./lint/format.js";
 import { lintSource } from "./lint/linter.js";
 import type { IrisLintMessage } from "./lint/types.js";
+import { parseShadcn } from "./shadcn/detect.js";
 
 export type LintFormat = "human" | "json" | "sarif";
 
@@ -42,6 +43,16 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
     const message = err instanceof Error ? err.message : String(err);
     io.err(`iris: ${message}`);
     return 2;
+  }
+
+  // Detect shadcn/ui install if present. parseShadcn never throws — a
+  // project without shadcn returns an empty components Map plus a
+  // "no-shadcn" warning that we surface as info-level (non-fatal) only
+  // when nothing was found. multi-shadcn warnings always surface.
+  const shadcn = await parseShadcn({ cwd });
+  for (const w of shadcn.warnings) {
+    if (w.kind === "no-shadcn") continue;
+    io.err(`iris warn [${w.kind}]: ${w.message}`);
   }
 
   let fatal = false;
@@ -90,8 +101,13 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
   let fixedCount = 0;
   for (const abs of files) {
     const source = await readFile(abs, "utf8");
-    const filename = relative(cwd, abs).replace(/\\/g, "/");
-    const messages = await lintSource(source, filename, theme);
+    // Pass the absolute path so the v0.3 shadcn rule's canonical-file
+    // suppression compares apples-to-apples against ShadcnComponent.filePath
+    // (which the detector stores absolute). Display-relative paths are
+    // produced from `relative(cwd, abs)` only at output time.
+    const absForLint = abs.replace(/\\/g, "/");
+    const displayPath = relative(cwd, abs).replace(/\\/g, "/");
+    const messages = await lintSource(source, absForLint, theme, shadcn);
     if (messages.length === 0) continue;
 
     if (options.fix === true) {
@@ -102,7 +118,7 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
         const remaining = messages.filter((m) => !isFixable(m));
         fixedCount += messages.length - remaining.length;
         if (remaining.length === 0) continue;
-        results.push({ filename, messages: remaining });
+        results.push({ filename: displayPath, messages: remaining });
         for (const m of remaining) {
           if (m.severity === "error") errorCount += 1;
         }
@@ -110,7 +126,7 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
       }
     }
 
-    results.push({ filename, messages });
+    results.push({ filename: displayPath, messages });
     for (const m of messages) {
       if (m.severity === "error") errorCount += 1;
     }
