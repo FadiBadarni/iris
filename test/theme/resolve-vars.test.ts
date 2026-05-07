@@ -90,4 +90,29 @@ describe("resolveVarChain", () => {
     expect(r.value).toBe("red red");
     expect(r.circular).toBe(false);
   });
+
+  it("resolves a function-shaped fallback with balanced parens", () => {
+    // Regex-based fallback parsing previously stopped at the first `)` and
+    // produced `oklch(0.5 0.2 264` (missing close paren). The AST walker
+    // sees the full function fallback as one node.
+    const r = resolveVarChain("var(--missing, oklch(0.5 0.2 264))", new Map());
+    expect(r.value).toBe("oklch(0.5 0.2 264)");
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it("resolves a var inside another function with a function-shaped fallback", () => {
+    // The exact case the regex broke: a var() with a function fallback
+    // sitting inside another function. Resolution must keep parens balanced
+    // both when the named var is found AND when it falls through to the
+    // fallback.
+    const vars = new Map([["--bg", "red"]]);
+    const r = resolveVarChain("oklch(from var(--bg, oklch(0.5 0.2 264)) calc(l * 1.1))", vars);
+    expect(r.value).toBe("oklch(from red calc(l * 1.1))");
+  });
+
+  it("preserves balanced parens when the function-fallback chain is taken", () => {
+    const vars = new Map<string, string>();
+    const r = resolveVarChain("oklch(from var(--bg, oklch(0.5 0.2 264)) calc(l * 1.1))", vars);
+    expect(r.value).toBe("oklch(from oklch(0.5 0.2 264) calc(l * 1.1))");
+  });
 });

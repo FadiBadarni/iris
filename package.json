@@ -57,7 +57,8 @@
     "cac": "^6.7.14",
     "jiti": "^2.7.0",
     "postcss": "^8.5.14",
-    "postcss-import": "^16.1.1"
+    "postcss-import": "^16.1.1",
+    "postcss-value-parser": "^4.2.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

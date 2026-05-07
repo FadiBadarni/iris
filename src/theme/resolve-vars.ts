@@ -1,6 +1,6 @@
 import type { Root } from "postcss";
+import valueParser, { type Node } from "postcss-value-parser";
 
-const VAR_REF = /var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g;
 const MAX_DEPTH = 8;
 
 /**
@@ -42,44 +42,92 @@ export type ResolveResult = {
   circular: boolean;
 };
 
+type ResolveCtx = {
+  unresolved: Set<string>;
+  circular: boolean;
+};
+
 /**
  * Resolve `var(--x)` and `var(--x, fallback)` references in `value` against
- * `vars`. Recurses through chained references depth-first. Each var() ref in
- * the input is resolved independently, with a per-chain active-path stack
- * that catches real cycles (--a → --b → --a) without flagging legitimate
- * reuse like `var(--shadow) 0 1px, var(--shadow) 0 4px` (the same name twice
- * at the same level is two separate chains, not a cycle).
+ * `vars`. Uses postcss-value-parser to walk a real CSS-value AST so nested
+ * function fallbacks like `var(--missing, oklch(0.5 0.2 264))` parse with
+ * balanced parens — the prior regex-only approach truncated at the first
+ * `)` and corrupted nested forms when the named var resolved.
+ *
+ * Resolution is depth-first per chain. The active-path stack distinguishes a
+ * real cycle (--a → --b → --a) from legitimate reuse (`var(--x) var(--x)`):
+ * the latter spawns two independent chains, neither sees the other.
  */
 export function resolveVarChain(value: string, vars: Map<string, string>): ResolveResult {
-  const unresolved = new Set<string>();
-  let circular = false;
-
-  const expand = (text: string, activePath: ReadonlyArray<string>, depth: number): string => {
-    if (depth >= MAX_DEPTH) return text;
-    return text.replace(VAR_REF, (_match, varName: string, rawFallback: string | undefined) => {
-      if (activePath.includes(varName)) {
-        circular = true;
-        return `var(${varName})`;
-      }
-      const looked = vars.get(varName);
-      if (looked === undefined) {
-        const fallback = rawFallback?.trim();
-        if (fallback) {
-          // The fallback is not "inside" varName (lookup failed) — keep the
-          // active path unchanged so a fallback referencing a name from
-          // higher up doesn't false-trip the cycle detector.
-          return expand(fallback, activePath, depth + 1);
-        }
-        unresolved.add(varName);
-        return `var(${varName})`;
-      }
-      return expand(looked, [...activePath, varName], depth + 1);
-    });
-  };
-
+  const ctx: ResolveCtx = { unresolved: new Set<string>(), circular: false };
+  const parsed = valueParser(value);
+  const out = stringifyNodes(parsed.nodes, vars, [], 0, ctx);
   return {
-    value: expand(value, [], 0),
-    unresolved: [...unresolved],
-    circular,
+    value: out,
+    unresolved: [...ctx.unresolved],
+    circular: ctx.circular,
   };
+}
+
+function stringifyNodes(
+  nodes: Node[],
+  vars: Map<string, string>,
+  activePath: ReadonlyArray<string>,
+  depth: number,
+  ctx: ResolveCtx,
+): string {
+  let out = "";
+  for (const node of nodes) {
+    if (node.type === "function" && node.value === "var") {
+      out += resolveVarFunction(node, vars, activePath, depth, ctx);
+    } else if (node.type === "function") {
+      // Other functions (oklch, calc, ...) — recurse into their args so any
+      // var() inside is resolved, then rebuild the function shape.
+      const inner = stringifyNodes(node.nodes, vars, activePath, depth, ctx);
+      out += `${node.value}(${node.before}${inner}${node.after})`;
+    } else {
+      out += valueParser.stringify(node);
+    }
+  }
+  return out;
+}
+
+function resolveVarFunction(
+  node: Node & { nodes: Node[] },
+  vars: Map<string, string>,
+  activePath: ReadonlyArray<string>,
+  depth: number,
+  ctx: ResolveCtx,
+): string {
+  if (depth >= MAX_DEPTH) return valueParser.stringify(node);
+
+  const wordNode = node.nodes[0];
+  if (!wordNode || wordNode.type !== "word") {
+    return valueParser.stringify(node);
+  }
+  const varName = wordNode.value;
+
+  if (activePath.includes(varName)) {
+    ctx.circular = true;
+    return `var(${varName})`;
+  }
+
+  const looked = vars.get(varName);
+  if (looked !== undefined) {
+    const subParsed = valueParser(looked);
+    return stringifyNodes(subParsed.nodes, vars, [...activePath, varName], depth + 1, ctx);
+  }
+
+  // Lookup failed. If a fallback is present (anything after the first comma
+  // div inside this var()), expand the fallback with the same active path —
+  // the fallback isn't "inside" varName, so it shouldn't extend the cycle
+  // protection scope.
+  const divIdx = node.nodes.findIndex((n) => n.type === "div" && n.value === ",");
+  if (divIdx >= 0) {
+    const fallbackNodes = node.nodes.slice(divIdx + 1);
+    return stringifyNodes(fallbackNodes, vars, activePath, depth + 1, ctx).trim();
+  }
+
+  ctx.unresolved.add(varName);
+  return `var(${varName})`;
 }
