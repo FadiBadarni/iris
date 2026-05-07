@@ -15,6 +15,7 @@ export type LintOptions = {
   cwd?: string;
   entry?: string;
   fix?: boolean;
+  force?: boolean;
   allowPartial?: boolean;
   format?: LintFormat;
 };
@@ -57,6 +58,20 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
       "iris: aborting — at least one fatal warning surfaced. re-run with --allow-partial to continue anyway.",
     );
     return 2;
+  }
+
+  // --fix rewrites source files in place. Refuse on a dirty git tree so a
+  // run mid-WIP doesn't overwrite uncommitted changes with no undo. --force
+  // is the explicit override; outside a git repo the check is a no-op.
+  if (options.fix === true && options.force !== true) {
+    const { isWorkingTreeDirty } = await import("./lint/git-state.js");
+    const state = await isWorkingTreeDirty(cwd);
+    if (state.dirty) {
+      io.err(
+        `iris: refusing to run --fix with uncommitted changes (${state.reason ?? "working tree dirty"}). re-run with --force to override.`,
+      );
+      return 2;
+    }
   }
 
   // Glob is silent on its own and skips node_modules/.git via the `dot:false`
@@ -137,6 +152,7 @@ function main(): void {
       "Lint files for arbitrary Tailwind values that bypass design tokens",
     )
     .option("--fix", "Apply suggested rewrites")
+    .option("--force", "Bypass the working-tree-dirty check on --fix")
     .option("--cwd <path>", "Project root (defaults to current directory)")
     .option("--entry <path>", "Override the v4 CSS entry path (e.g. styles/main.css)")
     .option("--allow-partial", "Don't exit on config-bridge-failed warnings")

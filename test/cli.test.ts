@@ -1,10 +1,22 @@
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { execSync } from "node:child_process";
+import { copyFile, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type LintIO, runLint } from "../src/cli.js";
 import { version } from "../src/index.js";
+
+// Initialize a tmp dir as a git repo with one initial commit. Used by the
+// --fix safety tests to set up a known-clean baseline that subsequent
+// writes can dirty.
+function gitInitAndCommit(dir: string): void {
+  execSync("git init", { cwd: dir });
+  execSync('git config user.email "t@t.test"', { cwd: dir });
+  execSync("git config user.name t", { cwd: dir });
+  execSync("git add .", { cwd: dir });
+  execSync('git commit -m "init"', { cwd: dir });
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -123,6 +135,54 @@ describe("iris cli", () => {
       expect(classAttr?.[1]).toContain("bg-[url(/hero.jpg)]");
       // CLI surfaces a one-line summary on stderr.
       expect(io.stderr).toMatch(/rewrote 1 class.+1 file/);
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("runLint --fix refuses on a dirty git tree without --force", async () => {
+    const fixtureSrc = resolve(here, "fixtures", "lint-cli");
+    const sandbox = await mkdtemp(join(tmpdir(), "iris-fix-dirty-"));
+    try {
+      await cp(fixtureSrc, sandbox, { recursive: true });
+      gitInitAndCommit(sandbox);
+      // Make the tree dirty by mutating the file the linter would target.
+      await writeFile(
+        join(sandbox, "Hero.tsx"),
+        '// dirty\nexport const Hero = () => <div className="bg-[#fa8072]" />;\n',
+      );
+
+      const io = captureIO();
+      const code = await runLint(["**/*.tsx"], { cwd: sandbox, fix: true }, io);
+
+      expect(code).toBe(2);
+      expect(io.stderr).toContain("--force");
+      expect(io.stderr).toMatch(/uncommitted/i);
+      // File must not have been rewritten — original arbitrary value still
+      // sits in the className.
+      const after = await readFile(join(sandbox, "Hero.tsx"), "utf8");
+      expect(after).toContain("bg-[#fa8072]");
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("runLint --fix --force overrides the dirty refusal", async () => {
+    const fixtureSrc = resolve(here, "fixtures", "lint-cli");
+    const sandbox = await mkdtemp(join(tmpdir(), "iris-fix-force-"));
+    try {
+      await cp(fixtureSrc, sandbox, { recursive: true });
+      gitInitAndCommit(sandbox);
+      // Add an unrelated dirty file so the working tree is non-empty.
+      await writeFile(join(sandbox, "extra.txt"), "scratch");
+
+      const io = captureIO();
+      const code = await runLint(["**/*.tsx"], { cwd: sandbox, fix: true, force: true }, io);
+
+      expect(code).toBe(0);
+      const after = await readFile(join(sandbox, "Hero.tsx"), "utf8");
+      const classAttr = after.match(/className="([^"]+)"/);
+      expect(classAttr?.[1]).toContain("bg-brand-salmon");
     } finally {
       await rm(sandbox, { recursive: true, force: true });
     }
