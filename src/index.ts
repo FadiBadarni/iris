@@ -1,4 +1,4 @@
-export const version = "0.0.0";
+export const version = "0.2.1";
 
 export { lookupByName, lookupByValue, parseTheme } from "./theme/parse.js";
 export type {
