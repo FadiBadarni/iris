@@ -1,10 +1,19 @@
 import type { ResolvedTheme, TokenEntry, TokenSource, TokenType } from "../theme/types.js";
+import { colorDeltaOklab } from "./color-distance.js";
 import { decomposeClass } from "./decompose.js";
 import type { SuggestCandidate, SuggestResult } from "./types.js";
 
 // Spacing/fontSize near-match thresholds, in px.
 const FONT_SIZE_THRESHOLD_PX = 2;
 const SPACING_THRESHOLD_PX = 4;
+
+// Color near-match thresholds in OKLab perceptual distance. ~0.05 is "very
+// similar, almost indistinguishable to most viewers"; 0.15 is the hard cap
+// where the rewriter refuses to suggest at all (visibly different color).
+// Values picked conservatively to bias toward fewer-but-confident
+// suggestions; v0.2.3 can tune from real-world data.
+const COLOR_NEAR_THRESHOLD = 0.05;
+const COLOR_HARD_CAP = 0.15;
 
 const SOURCE_RANK: Record<TokenSource, number> = {
   "v4-theme": 0,
@@ -38,9 +47,7 @@ export function suggestToken(className: string, theme: ResolvedTheme): SuggestRe
     return { kind: "ambiguous", candidates };
   }
 
-  // 2. Numeric near-match for spacing/fontSize. Colors and other types
-  //    don't get near-match in slice C.1 — colors need OKLab ΔE which lands
-  //    when culori is added.
+  // 2. Numeric near-match for spacing/fontSize.
   if (type === "fontSize" || type === "spacing") {
     const wantPx = parsePx(value);
     if (wantPx === null) return { kind: "none" };
@@ -57,6 +64,31 @@ export function suggestToken(className: string, theme: ResolvedTheme): SuggestRe
       }
     }
     if (best !== null) {
+      return {
+        kind: "near",
+        tokenName: best.entry.name,
+        replacement: buildReplacement(sign, prefix, best.entry.name),
+        delta: best.delta,
+      };
+    }
+  }
+
+  // 3. Perceptual near-match for colors via OKLab. Tokens beyond the hard
+  //    cap are ignored entirely; the closest within the hard cap returns
+  //    `near` only if it sits within the strong-near threshold so we don't
+  //    suggest something visibly different.
+  if (type === "color") {
+    let best: { entry: TokenEntry; delta: number } | null = null;
+    for (const entry of theme.tokens.values()) {
+      if (entry.type !== "color") continue;
+      const delta = colorDeltaOklab(value, entry.value);
+      if (delta === null) continue;
+      if (delta > COLOR_HARD_CAP) continue;
+      if (best === null || delta < best.delta) {
+        best = { entry, delta };
+      }
+    }
+    if (best !== null && best.delta <= COLOR_NEAR_THRESHOLD) {
       return {
         kind: "near",
         tokenName: best.entry.name,

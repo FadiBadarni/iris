@@ -92,11 +92,6 @@ describe("suggestToken — numeric near match", () => {
     const t = theme([{ name: "spacing.4", value: "16px", type: "spacing" }]);
     expect(suggestToken("p-[100px]", t).kind).toBe("none");
   });
-
-  test("colors do not get near-neighbor in slice C.1", () => {
-    const t = theme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
-    expect(suggestToken("bg-[#fa8073]", t).kind).toBe("none");
-  });
 });
 
 describe("suggestToken — ambiguous", () => {
@@ -148,5 +143,40 @@ describe("suggestToken — negative arbitrary spacing", () => {
       replacement: "-inset-4",
       delta: 1,
     });
+  });
+});
+
+describe("suggestToken — color near match", () => {
+  test("bg-[#fa8073] -> bg-brand-salmon when token is #fa8072 (one digit off)", () => {
+    const t = theme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
+    const result = suggestToken("bg-[#fa8073]", t);
+    expect(result.kind).toBe("near");
+    if (result.kind === "near") {
+      expect(result.replacement).toBe("bg-brand-salmon");
+      expect(result.delta).toBeGreaterThan(0);
+      expect(result.delta).toBeLessThan(0.05);
+    }
+  });
+
+  test("bg-[#0000ff] returns 'none' against a salmon-only theme", () => {
+    const t = theme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
+    expect(suggestToken("bg-[#0000ff]", t).kind).toBe("none");
+  });
+
+  test("two near colors land as 'near' on the closest by OKLab distance", () => {
+    // Two tokens within the near threshold of #fa8074. The rewriter's color
+    // path picks the single closest rather than surfacing both as
+    // ambiguous — ambiguous is reserved for tokens that share an exact
+    // value via byValue, which colors don't (different hexes).
+    const t = theme([
+      { name: "colors.salmon-light", value: "#fa8073", type: "color" },
+      { name: "colors.salmon", value: "#fa8072", type: "color" },
+    ]);
+    const result = suggestToken("bg-[#fa8074]", t);
+    expect(result.kind).toBe("near");
+    if (result.kind === "near") {
+      // #fa8073 is 1 hex closer to #fa8074 than #fa8072 is
+      expect(result.replacement).toBe("bg-salmon-light");
+    }
   });
 });
