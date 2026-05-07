@@ -52,6 +52,7 @@ describe("cache", () => {
     ]),
     sources: [sourceFile],
     warnings: [],
+    suppressedPrefixes: new Set(),
   });
 
   it("stores and retrieves a theme", async () => {

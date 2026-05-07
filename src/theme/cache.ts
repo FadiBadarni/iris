@@ -11,6 +11,10 @@ type SerializedTheme = {
   byValue: Array<[string, TokenEntry[]]>;
   sources: string[];
   warnings?: ParseWarning[];
+  // Optional for forward-compat: cache entries written before this field
+  // existed deserialize to an empty Set, matching the behavior they had at
+  // write time (no namespace resets recognized).
+  suppressedPrefixes?: string[];
 };
 
 type CacheEntry = {
@@ -114,6 +118,7 @@ function serialize(theme: ResolvedTheme): SerializedTheme {
     byValue: [...theme.byValue.entries()],
     sources: theme.sources,
     warnings: theme.warnings,
+    suppressedPrefixes: [...theme.suppressedPrefixes],
   };
 }
 
@@ -126,5 +131,6 @@ function deserialize(s: SerializedTheme): ResolvedTheme {
     // Default to [] for cache entries written before the warnings field
     // existed — they pre-date this fix and have no warnings to surface.
     warnings: s.warnings ?? [],
+    suppressedPrefixes: new Set(s.suppressedPrefixes ?? []),
   };
 }

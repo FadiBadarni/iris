@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": ["dist", "node_modules", "coverage", ".debate"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "coverage",
+      ".debate",
+      "test/fixtures/**/*.css"
+    ]
   },
   "formatter": {
     "enabled": true,

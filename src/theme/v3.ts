@@ -77,6 +77,7 @@ export async function parseV3FromConfigPath(configPath: string): Promise<Resolve
     byValue,
     sources: [...sources].sort(),
     warnings: [],
+    suppressedPrefixes: new Set(),
   };
 }
 

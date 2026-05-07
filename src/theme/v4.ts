@@ -88,6 +88,7 @@ export async function parseV4(
   const tokens = new Map<string, TokenEntry>();
   const byValue = new Map<string, TokenEntry[]>();
   const warnings: ParseWarning[] = [];
+  const suppressedPrefixes = new Set<string>();
 
   // Build a var map from every :root / .dark / [data-theme="..."] / @layer
   // base block in the flattened CSS. Used to resolve var() references that
@@ -100,7 +101,19 @@ export async function parseV4(
       const varName = decl.prop;
       const rawValue = decl.value.trim();
       if (!varName.startsWith("--")) return;
-      if (rawValue === "initial") return; // namespace reset — drop matching prefix at lint time
+      if (rawValue === "initial") {
+        // Namespace reset. `--*: initial` wipes everything (empty prefix).
+        // `--color-*: initial` wipes the color namespace. A bare name like
+        // `--color-red-500: initial` suppresses just that one default.
+        if (varName === "--*") {
+          suppressedPrefixes.add("");
+        } else if (varName.endsWith("-*")) {
+          suppressedPrefixes.add(varName.slice(2, -2));
+        } else {
+          suppressedPrefixes.add(varName.slice(2));
+        }
+        return;
+      }
 
       const sourceFile = decl.source?.input.from ?? entryPath;
       const resolution = resolveVarChain(rawValue, vars);
@@ -130,12 +143,13 @@ export async function parseV4(
   // @config bridge — v4 projects can pull a v3 JS config in via
   // `@config "./tailwind.config.ts"`. Walk those, run the v3 adapter on
   // each target, and merge non-conflicting tokens. CSS @theme entries
-  // already in `tokens` win over JS config entries.
+  // already in `tokens` win over JS config entries; namespace resets
+  // wipe matching bridged tokens too.
   const configBridges = collectConfigBridges(result.root, entryPath);
   for (const configPath of configBridges) {
     try {
       const v3Theme = await parseV3FromConfigPath(configPath);
-      mergeBridgedTheme(v3Theme, tokens, byValue);
+      mergeBridgedTheme(v3Theme, tokens, byValue, suppressedPrefixes);
       for (const src of v3Theme.sources) sources.add(src);
       for (const w of v3Theme.warnings) warnings.push(w);
     } catch (err) {
@@ -150,9 +164,10 @@ export async function parseV4(
 
   // Tailwind v4 default theme — seed the defaults the project gets
   // implicitly through `@import "tailwindcss"`. User @theme entries
-  // already in `tokens` win over defaults via skip-if-exists.
+  // already in `tokens` win over defaults via skip-if-exists; namespace
+  // resets wipe matching defaults too.
   if (hasTailwindImport(result.root)) {
-    await seedV4Defaults(cwd, tokens, byValue, sources, warnings);
+    await seedV4Defaults(cwd, tokens, byValue, sources, warnings, suppressedPrefixes);
   }
 
   return {
@@ -161,7 +176,50 @@ export async function parseV4(
     byValue,
     sources: [...sources].sort(),
     warnings,
+    suppressedPrefixes,
   };
+}
+
+function isSuppressed(varName: string, suppressed: Set<string>): boolean {
+  if (suppressed.size === 0) return false;
+  if (suppressed.has("")) return true;
+  const stem = varName.startsWith("--") ? varName.slice(2) : varName;
+  for (const prefix of suppressed) {
+    if (stem === prefix || stem.startsWith(`${prefix}-`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Reverse mapping: given a canonical token name like `colors.red-500`, derive
+ * the original v3 namespace key (`colors`) and dotted tail (`red-500`) so we
+ * can synthesize the equivalent v4 var name (`--color-red-500`) for
+ * suppression matching against bridged tokens.
+ */
+const V3_NS_TO_V4_PREFIX: Record<string, string> = {
+  colors: "color",
+  spacing: "spacing",
+  fontSize: "text",
+  fontWeight: "font-weight",
+  fontFamily: "font",
+  borderRadius: "radius",
+  lineHeight: "leading",
+  letterSpacing: "tracking",
+  boxShadow: "shadow",
+  screens: "breakpoint",
+};
+
+function bridgedNameSuppressed(canonicalName: string, suppressed: Set<string>): boolean {
+  if (suppressed.size === 0) return false;
+  if (suppressed.has("")) return true;
+  const dot = canonicalName.indexOf(".");
+  if (dot < 0) return false;
+  const ns = canonicalName.slice(0, dot);
+  const tail = canonicalName.slice(dot + 1).replace(/\./g, "-");
+  const v4Prefix = V3_NS_TO_V4_PREFIX[ns];
+  if (!v4Prefix) return false;
+  const synthetic = tail ? `--${v4Prefix}-${tail}` : `--${v4Prefix}`;
+  return isSuppressed(synthetic, suppressed);
 }
 
 function hasTailwindImport(root: postcss.Root): boolean {
@@ -181,6 +239,7 @@ async function seedV4Defaults(
   byValue: Map<string, TokenEntry[]>,
   sources: Set<string>,
   warnings: ParseWarning[],
+  suppressedPrefixes: Set<string>,
 ): Promise<void> {
   const themeCssPath = locateV4ThemeCss(projectRoot);
   if (!themeCssPath) {
@@ -201,6 +260,7 @@ async function seedV4Defaults(
         const value = decl.value.trim();
         if (!varName.startsWith("--")) return;
         if (value === "initial") return;
+        if (isSuppressed(varName, suppressedPrefixes)) return;
         const type = inferType(varName, value);
         const name = canonicalName(varName, type);
         if (tokens.has(name)) return; // user @theme / bridge wins
@@ -249,9 +309,11 @@ function mergeBridgedTheme(
   bridged: ResolvedTheme,
   tokens: Map<string, TokenEntry>,
   byValue: Map<string, TokenEntry[]>,
+  suppressedPrefixes: Set<string>,
 ): void {
   for (const [name, entry] of bridged.tokens) {
     if (tokens.has(name)) continue; // CSS @theme wins
+    if (bridgedNameSuppressed(name, suppressedPrefixes)) continue;
     const bridgedEntry: TokenEntry = { ...entry, source: "v4-config-bridge" };
     tokens.set(name, bridgedEntry);
     const list = byValue.get(bridgedEntry.value) ?? [];

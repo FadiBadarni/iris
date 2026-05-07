@@ -40,6 +40,10 @@ export type ResolvedTheme = {
   byValue: Map<string, TokenEntry[]>;
   sources: string[];
   warnings: ParseWarning[];
+  // Prefixes the v4 @theme block wiped via `--<prefix>-*: initial` (without
+  // trailing dash; matched as `varName.startsWith(prefix + "-")`). The empty
+  // string means `--*: initial` — wipe every default token.
+  suppressedPrefixes: Set<string>;
 };
 
 export type ParseOptions = {
