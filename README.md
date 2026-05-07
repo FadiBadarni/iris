@@ -1,5 +1,9 @@
 # iris
 
+[![npm](https://img.shields.io/npm/v/iris-cc?logo=npm&color=cb3837&label=iris-cc)](https://www.npmjs.com/package/iris-cc)
+[![license](https://img.shields.io/npm/l/iris-cc)](LICENSE)
+[![node](https://img.shields.io/node/v/iris-cc?logo=node.js)](package.json)
+
 > **Status: v0.5.0 is on npm (`iris-cc`). Five surfaces ship: `npx iris lint` CLI, programmatic `lintSource` API, `iris-hook` (Claude Code PreToolUse with persistent `iris-daemon` for sub-200ms warm calls), `iris-mcp` (four MCP tools), and an `iris.config.ts` for user customization.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
