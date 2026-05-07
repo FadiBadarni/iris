@@ -1,0 +1,9 @@
+{
+  "_comment": "Cursor uses ~/.cursor/mcp.json (global) or .cursor/mcp.json (project). Same shape as Claude Code's mcp.json.",
+  "mcpServers": {
+    "iris": {
+      "command": "npx",
+      "args": ["-y", "iris-mcp"]
+    }
+  }
+}

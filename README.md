@@ -1,6 +1,6 @@
 # iris
 
-> **Status: v0.1 lint engine and v0.2.1 Claude Code hook are code-complete on `main`. MCP server (v0.2.1 γ) in progress. Not yet on npm — first publish lands with the v0.2.1 release. Use locally via `pnpm link` or a git install for now.**
+> **Status: v0.2.1 is code-complete on `main` — lint engine, Claude Code hook, and MCP server all ship. npm publish lands with slice δ (release prep). Use locally via `pnpm link` or a git install in the meantime.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
 
@@ -36,8 +36,8 @@ Run `npx iris lint --fix` to apply suggestions in place. v0.3's shadcn awareness
 | v0.1 | `npx iris lint` CLI — Tailwind v3 + v4 parsing, allowlist, semantic rewriting, `--fix` | shipped to `main` |
 | v0.2.1 α | Public `lintSource` + `IrisLintMessage` contract, `iris/lint` subpath export | shipped to `main` |
 | v0.2.1 β | Claude Code PreToolUse hook (`iris-hook`), example settings + skill | shipped to `main` |
-| v0.2.1 γ | MCP server (`iris-mcp`) for Cursor/Windsurf/Zed/Claude Code | in progress |
-| v0.2.1 δ | npm publish, CHANGELOG, version bump | pending γ |
+| v0.2.1 γ | MCP server (`iris-mcp`) for Cursor/Windsurf/Zed/Claude Code | shipped to `main` |
+| v0.2.1 δ | npm publish, CHANGELOG, version bump | next |
 | v0.3 | shadcn awareness — detect installed components, steer AI toward reuse | planned |
 
 A Playwright + Vision visual QA loop and an edit-watching taste profile were considered and deferred. See [CLAUDE.md](CLAUDE.md) for the full spec.
@@ -110,6 +110,27 @@ Project-local config — `.claude/settings.json`:
 When Claude generates a `<div className="bg-[#fa8072]" />`, the hook blocks the write and returns the iris suggestion (`bg-brand-salmon`) as the block reason. The AI applies the suggested token and the write goes through on the next turn.
 
 The example skill at [`examples/claude-code/iris.skill.md`](examples/claude-code/iris.skill.md) nudges the AI toward token use *before* the hook fires; the hook is the hard gate when guidance fails. Both files are copy-paste ready.
+
+## MCP server
+
+`iris-mcp` exposes the same engine as a single MCP tool — `lint_source(source, filename, projectRoot?) → { violations: IrisLintMessage[] }` — so any MCP-capable editor can call it on demand. The hook is the hard gate during writes; the MCP tool is what an AI calls *while reasoning* about a Tailwind change ("does this class exist? is there a matching token?").
+
+Claude Code — `~/.claude/mcp.json` or `.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "iris": {
+      "command": "npx",
+      "args": ["-y", "iris-mcp"]
+    }
+  }
+}
+```
+
+Cursor uses `~/.cursor/mcp.json` (or `.cursor/mcp.json`); Windsurf and Zed accept the same shape. Examples live under [`examples/mcp/`](examples/mcp/).
+
+The tool returns both `content` (a JSON-encoded text block) and `structuredContent` for clients that index structured fields; engine failures (no Tailwind project, parser crash) surface as `isError: true` with an actionable message rather than an empty `violations` array.
 
 ## Install
 
