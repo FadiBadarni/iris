@@ -57,7 +57,7 @@ iris is opinionated: Tailwind, Next.js, shadcn-friendly, MCP-first. If you don't
 The lint engine is a stable contract that adapters consume. The Claude Code pre-write hook and the MCP server (both shipping in v0.2.1) are thin transports over the same surface — anyone building custom tooling can call it directly.
 
 ```ts
-import { lintSource, parseTheme, type IrisLintMessage } from "iris";
+import { lintSource, parseTheme, type IrisLintMessage } from "iris-cc";
 
 const theme = await parseTheme({ cwd: process.cwd() });
 const messages: IrisLintMessage[] = await lintSource(
@@ -72,23 +72,23 @@ const messages: IrisLintMessage[] = await lintSource(
 //   suggestion: { kind: "exact", tokenName: "colors.brand.salmon", replacement: "bg-brand-salmon" }
 ```
 
-The engine is also reachable via the `iris/lint` subpath for adapter code that doesn't need `parseTheme` or the CLI surface:
+The engine is also reachable via the `iris-cc/lint` subpath for adapter code that doesn't need `parseTheme` or the CLI surface:
 
 ```ts
-import { lintSource, type IrisLintMessage } from "iris/lint";
+import { lintSource, type IrisLintMessage } from "iris-cc/lint";
 ```
 
 `IrisLintMessage` carries `line`, `column`, `severity`, `classname`, and a discriminated `suggestion` union (`exact | near | ambiguous | none`). Full shape lives in [`src/lint/types.ts`](src/lint/types.ts).
 
 ## Claude Code integration
 
-iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before they land. Once v0.2.1 publishes, install iris in the workspace and drop the hook into `.claude/settings.json`:
+iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before they land. Install the package and drop the hook into `.claude/settings.json`:
 
 ```bash
-pnpm add -D iris
+pnpm add -D iris-cc
 ```
 
-> Until npm publish lands, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris` to wire the same `iris-hook` binary.
+The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`) match the project name unchanged. Until v0.2.1 publishes you can install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.
 
 Project-local config — `.claude/settings.json`:
 

@@ -6,6 +6,8 @@ All notable changes to iris are documented in this file. Format follows [Keep a 
 
 The first publishable release. Ships the v0.1 lint engine plus two new surfaces (Claude Code hook, MCP server) on top of a stable public contract.
 
+The npm package name is **`iris-cc`** — the bare `iris` name on npm was already taken by an unrelated, dormant package. The repo, project name, and bin names (`iris`, `iris-hook`, `iris-mcp`) stay unchanged; only the import specifier is `iris-cc` (and `iris-cc/lint` for the subpath).
+
 ### Added
 
 - **`npx iris lint` CLI.** Tailwind-aware lint engine wrapping `eslint-plugin-tailwindcss`. Catches arbitrary values (`bg-[#f3f4f6]`) and unknown classnames against the project's resolved tokens, with semantic suggestions (`bg-muted`, `text-sm`) drawn from the parsed `tailwind.config.{ts,js}` (v3) or `globals.css @theme` (v4). Supports `--fix` for in-place rewriting and `--format human|json|sarif` output.
