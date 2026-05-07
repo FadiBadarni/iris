@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 import { loadConfig } from "../config/load.js";
 import type { IrisConfig } from "../config/types.js";
-import { parseTheme } from "../index.js";
+import { lintViaDaemon } from "../daemon/client.js";
+import { getOrSpawnDaemon } from "../daemon/spawn.js";
+import { parseTheme, version } from "../index.js";
 import { parseShadcn } from "../shadcn/detect.js";
-import { type HookEvent, preWrite } from "./preWrite.js";
-
-const require = createRequire(import.meta.url);
+import {
+  type HookDecision,
+  type HookEvent,
+  decideFromMessages,
+  lintInputFromEvent,
+  preWrite,
+} from "./preWrite.js";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -18,7 +24,6 @@ async function readStdin(): Promise<string> {
 async function main(): Promise<void> {
   const raw = await readStdin();
   if (!raw.trim()) {
-    process.exit(0);
     return;
   }
   let event: HookEvent;
@@ -28,75 +33,121 @@ async function main(): Promise<void> {
     // Unknown stdin shape — let Claude Code's tool call through. iris
     // refusing to participate is always preferable to iris blocking valid
     // work because the hook contract drifted.
-    process.exit(0);
     return;
   }
 
+  // Skip the heavy lifting (daemon spawn, theme parse) for files we don't
+  // analyze. Same JSX_LIKE guard preWrite would apply, hoisted here so the
+  // daemon path doesn't get spawned for a package.json edit.
+  const input = lintInputFromEvent(event);
+  if (!input) {
+    return;
+  }
+
+  // The daemon's cwd is the directory that owns the Tailwind config for
+  // this file. Walk up from the file looking for `tailwind.config.*` so
+  // monorepos with a shared root-level config (Turborepo, Nx) work even
+  // when the edited file lives in a workspace package whose own
+  // `package.json` has no config of its own. If no ancestor has a
+  // Tailwind config, this isn't a Tailwind project for our purposes —
+  // exit silently and avoid the daemon spawn entirely. v4 CSS-first
+  // projects without a JS config can drop a stub `export default {}` to
+  // opt in; documented limitation.
   let cwd = process.cwd();
   if (event?.tool_input?.file_path) {
-    cwd = findProjectRoot(event.tool_input.file_path) ?? cwd;
-  }
-
-  let theme: Awaited<ReturnType<typeof parseTheme>>;
-  try {
-    theme = await parseTheme({ cwd });
-  } catch {
-    // Not a tailwind project, or the parser tripped on something unusual.
-    // Silent skip — same posture as malformed stdin.
-    process.exit(0);
+    const root = findTailwindRoot(event.tool_input.file_path);
+    if (!root) return;
+    cwd = root;
+  } else if (!hasTailwindConfig(cwd)) {
     return;
   }
 
-  // parseShadcn never throws — projects without shadcn return an empty
-  // components Map plus a `no-shadcn` warning we silently ignore here.
-  // The hook should never fail because shadcn is missing.
-  const shadcn = await parseShadcn({ cwd });
+  let decision: HookDecision = null;
 
-  // iris.config.{ts,mjs,js} is optional. A broken config shouldn't freeze
-  // the hook; warn to stderr (visible in `claude --debug`) and fall back
-  // to defaults. Same posture as the parseTheme catch above.
-  let config: IrisConfig | undefined;
+  // Daemon path: detect-or-spawn an iris-daemon for this project root and
+  // POST the lint request. Headline win: daemon holds warm theme/shadcn/
+  // config caches, so the warm-call latency drops below the <200ms budget
+  // CLAUDE.md set for the hook (cold startup pays the spawn cost once).
   try {
-    config = (await loadConfig({ cwd })) ?? undefined;
-  } catch (err) {
+    const lock = await getOrSpawnDaemon(cwd, { expectedVersion: version });
+    const messages = await lintViaDaemon(lock, {
+      source: input.source,
+      filename: input.filename,
+      projectRoot: cwd,
+    });
+    decision = decideFromMessages(input.filename, messages);
+  } catch (daemonErr) {
+    // Fallback path: in-process resolution. Slower but guarantees the
+    // hook never blocks Claude Code on a daemon hiccup. Surface the
+    // daemon error to stderr (visible in `claude --debug`) for triage.
     process.stderr.write(
-      `iris-hook: failed to load iris.config — falling back to defaults: ${
-        err instanceof Error ? err.message : String(err)
+      `iris-hook: daemon path failed, falling back to in-process: ${
+        daemonErr instanceof Error ? daemonErr.message : String(daemonErr)
       }\n`,
     );
+    try {
+      const theme = await parseTheme({ cwd });
+      const shadcn = await parseShadcn({ cwd });
+      let config: IrisConfig | undefined;
+      try {
+        config = (await loadConfig({ cwd })) ?? undefined;
+      } catch (err) {
+        process.stderr.write(
+          `iris-hook: failed to load iris.config — falling back to defaults: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+      }
+      decision = await preWrite(event, theme, shadcn, config);
+    } catch {
+      // Not a tailwind project, or another fatal — silent skip, same as
+      // the legacy hook behavior so a non-iris repo never breaks Claude
+      // Code's flow. Return rather than process.exit(0) for the same
+      // libuv-on-Windows reason as the top-level catch.
+      return;
+    }
   }
 
-  const decision = await preWrite(event, theme, shadcn, config);
   if (decision !== null) {
     process.stdout.write(JSON.stringify(decision));
   }
-  process.exit(0);
 }
 
-function findProjectRoot(filePath: string): string | null {
-  // Walk up from the file's directory looking for package.json. Bounded to
-  // 30 levels to defeat symlink loops; falls back to process.cwd() in
-  // main(). Walking from `dirname` (not the path itself) avoids a wasted
-  // first iteration that stats `<file>/package.json`.
-  const fs = require("node:fs") as typeof import("node:fs");
+const TAILWIND_CONFIG_NAMES = [
+  "tailwind.config.ts",
+  "tailwind.config.js",
+  "tailwind.config.mjs",
+  "tailwind.config.cjs",
+] as const;
+
+function hasTailwindConfig(dir: string): boolean {
+  for (const name of TAILWIND_CONFIG_NAMES) {
+    if (existsSync(resolvePath(dir, name))) return true;
+  }
+  return false;
+}
+
+function findTailwindRoot(filePath: string): string | null {
+  // Walk up from the file's directory, returning the first ancestor with
+  // a `tailwind.config.*`. Covers Turborepo / Nx monorepos where the
+  // shared config sits at the workspace root rather than inside the
+  // package containing the edited file. Bounded to 30 hops to defeat
+  // symlink loops.
   let dir = dirname(resolvePath(filePath));
   for (let i = 0; i < 30; i++) {
-    try {
-      fs.statSync(resolvePath(dir, "package.json"));
-      return dir;
-    } catch {
-      const parent = resolvePath(dir, "..");
-      if (parent === dir) return null;
-      dir = parent;
-    }
+    if (hasTailwindConfig(dir)) return dir;
+    const parent = resolvePath(dir, "..");
+    if (parent === dir) return null;
+    dir = parent;
   }
   return null;
 }
 
 main().catch((err) => {
   // Never block a Claude Code tool call on iris errors. Surface to stderr
-  // so a misconfigured iris install is debuggable, then exit 0 to allow
-  // the write through.
+  // so a misconfigured iris install is debuggable. Don't call
+  // process.exit() — that races with libuv's closure of the detached
+  // daemon child handle on Windows. Letting Node exit naturally avoids
+  // the `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` panic.
   process.stderr.write(`iris-hook: ${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(0);
 });

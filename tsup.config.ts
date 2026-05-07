@@ -7,6 +7,7 @@ export default defineConfig({
     "lint/index": "src/lint/index.ts",
     "hook/cli": "src/hook/cli.ts",
     "mcp/cli": "src/mcp/cli.ts",
+    "daemon/cli": "src/daemon/cli.ts",
   },
   format: ["esm"],
   target: "node18",

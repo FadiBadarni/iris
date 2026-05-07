@@ -35,30 +35,47 @@ export type HookDecision = { decision: "block"; reason: string } | null;
 // positives if a tool author added Tailwind-shaped strings to a config.
 const JSX_LIKE = /\.(tsx|jsx|mdx)$/i;
 
+/**
+ * Extracts the source + filename to lint from a HookEvent, or returns null
+ * for files iris doesn't analyze (non-JSX, empty edits). Used by both the
+ * in-process `preWrite` and the v0.5 daemon path so the JSX_LIKE guard and
+ * the multi-edit join logic live in one place.
+ */
+export type LintInput = { source: string; filename: string };
+
+export function lintInputFromEvent(event: HookEvent): LintInput | null {
+  if (!JSX_LIKE.test(event.tool_input.file_path)) return null;
+  const source = extractSource(event);
+  if (!source) return null;
+  return { source, filename: event.tool_input.file_path };
+}
+
+/**
+ * Final decision step: convert a lint pass's messages into a HookDecision.
+ * Only error-severity blocks; warnings inform without freezing the AI's
+ * tool call. Pulled out of `preWrite` so the daemon path (which gets
+ * messages from the wire, not from a local lintSource call) can reuse it.
+ */
+export function decideFromMessages(filename: string, messages: IrisLintMessage[]): HookDecision {
+  if (messages.length === 0) return null;
+  const errors = messages.filter((m) => m.severity === "error");
+  if (errors.length === 0) return null;
+  return {
+    decision: "block",
+    reason: renderReason(filename, errors),
+  };
+}
+
 export async function preWrite(
   event: HookEvent,
   theme: ResolvedTheme,
   shadcn?: ShadcnState,
   config?: IrisConfig,
 ): Promise<HookDecision> {
-  if (!JSX_LIKE.test(event.tool_input.file_path)) return null;
-
-  const source = extractSource(event);
-  if (!source) return null;
-
-  const messages = await lintSource(source, event.tool_input.file_path, theme, shadcn, config);
-  if (messages.length === 0) return null;
-
-  // Only error-severity blocks. Warnings (no-custom-classname today, more
-  // later) inform without freezing the AI's tool call — the user gets a
-  // diagnostic in the lint CLI run, the hook stays out of the way.
-  const errors = messages.filter((m) => m.severity === "error");
-  if (errors.length === 0) return null;
-
-  return {
-    decision: "block",
-    reason: renderReason(event.tool_input.file_path, errors),
-  };
+  const input = lintInputFromEvent(event);
+  if (!input) return null;
+  const messages = await lintSource(input.source, input.filename, theme, shadcn, config);
+  return decideFromMessages(input.filename, messages);
 }
 
 function extractSource(event: HookEvent): string | null {

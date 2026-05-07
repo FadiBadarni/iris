@@ -11,6 +11,8 @@
       "node_modules",
       "coverage",
       ".debate",
+      ".iris",
+      "**/.iris/**",
       "test/fixtures/**/*.css",
       "test/fixtures/**/*.tsx"
     ]
