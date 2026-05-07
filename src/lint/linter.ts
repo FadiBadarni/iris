@@ -18,9 +18,14 @@ const linter = new Linter({ configType: "flat" });
 // the plugin doesn't fall back to its filesystem config-discovery and emit
 // "Cannot resolve default tailwindcss config path..." to stderr — that
 // pollutes CI logs and the future MCP hook's I/O.
+// `files:` is required to engage the parser — without it ESLint flat
+// config falls through and reports "no matching configuration." The
+// pattern below matches both relative paths (`Hero.tsx`) and absolute
+// forward-slash paths the v0.3 shadcn rule needs (`C:/Users/…/Hero.tsx`).
+// Forward-slash normalization happens at the boundary in `lintSource`.
 const baseConfig: Linter.FlatConfig[] = [
   {
-    files: ["**/*.{ts,tsx,js,jsx,mdx}"],
+    files: ["**/*.{ts,tsx,js,jsx,mdx}", "*.{ts,tsx,js,jsx,mdx}"],
     languageOptions: {
       // biome-ignore lint/suspicious/noExplicitAny: tsParser type and ESLint Parser type drift across versions; cast at the boundary
       parser: tsParser as any,
@@ -71,14 +76,22 @@ export async function lintSource(
   theme?: ResolvedTheme,
 ): Promise<IrisLintMessage[]> {
   const cfg = theme === undefined ? baseConfig : configFor(theme);
-  // ESLint's flat-config `files: ["**/*.{ts,tsx,…}"]` glob matches against
-  // forward-slash paths and gets confused by absolute paths with drive
-  // letters (`C:/Users/…/Hero.tsx`). Pass just the basename — the filename
-  // is metadata for ESLint, not a path resolution input. Line/column come
-  // from the source content; the caller already knows the original
-  // filename and can attach it to the IrisLintMessage downstream.
-  const ruleMatchName = basename(filename.replace(/\\/g, "/"));
-  const raw = linter.verify(source, cfg, { filename: ruleMatchName });
+  // Two-channel filename: `filename` is the basename so ESLint's
+  // flat-config glob (`**/*.{ts,tsx,…}`) engages even for Windows-absolute
+  // paths with drive letters that the glob can't match. `physicalFilename`
+  // carries the full forward-slash path through to rules that need it
+  // (v0.3 shadcn canonical-file suppression compares against
+  // ShadcnComponent.filePath).
+  const fullFilename = filename.replace(/\\/g, "/");
+  const ruleMatchName = basename(fullFilename);
+  // ESLint accepts `physicalFilename` at runtime and forwards it to rule
+  // contexts, but @types/eslint's LintOptions doesn't expose it. Cast at the
+  // boundary so the v0.3 shadcn rule can read the full path.
+  const raw = linter.verify(source, cfg, {
+    filename: ruleMatchName,
+    physicalFilename: fullFilename,
+    // biome-ignore lint/suspicious/noExplicitAny: physicalFilename missing from LintOptions type
+  } as any);
   const out: IrisLintMessage[] = [];
   for (const m of raw) {
     const msg = toIrisMessage(m, theme);
