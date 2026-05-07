@@ -27,4 +27,18 @@ describe("extractClassFromMessage", () => {
       extractClassFromMessage("Classname 'bg-totally-fake' is not a Tailwind CSS class!"),
     ).toBe("bg-totally-fake");
   });
+
+  test("preserves single quotes inside an arbitrary-value class", () => {
+    // Tailwind permits single quotes inside arbitrary properties — `cv11` is a
+    // font-feature-settings tag, single-quoted by spec.
+    expect(
+      extractClassFromMessage("Arbitrary value detected in '[font-feature-settings:'cv11']'"),
+    ).toBe("[font-feature-settings:'cv11']");
+  });
+
+  test("preserves single quotes in content-['→']", () => {
+    expect(extractClassFromMessage("Arbitrary value detected in 'content-['→']'")).toBe(
+      "content-['→']",
+    );
+  });
 });
