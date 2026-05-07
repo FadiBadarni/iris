@@ -19,22 +19,56 @@ const MAX_DEPTH = 8;
 // they would either pollute it with implementation details or, worse, fold
 // in as the source of their own resolution.
 //
-// Each branch in a comma-separated selector list is tested independently;
+// Each branch in a comma-separated selector list is tested independently
+// (commas inside `(...)` and `[...]` do not count as branch separators);
 // the rule contributes vars only when EVERY branch is a global anchor.
 // `.dark .panel` does not qualify (the descendant combinator scopes the
 // vars to .panel inside .dark), but `.dark, :root[data-theme="dim"]` does.
+// `:is(:root, .dark)` and `:where(:root, .dark)` are unwrapped — same
+// scoping semantics as the comma-list for our purposes.
 const GLOBAL_BRANCH_RE =
   /^(?::root|:host|html)(?:\.[\w-]+|\[[^\]]+\])*$|^\.dark$|^\[data-theme(?:[~|^$*]?=["'][^"']+["'])?\]$/;
+const IS_WHERE_WRAPPER_RE = /^:(?:is|where)\((.+)\)$/;
+
+function isGlobalBranch(branch: string): boolean {
+  const trimmed = branch.trim();
+  const wrapped = trimmed.match(IS_WHERE_WRAPPER_RE);
+  if (wrapped) return isGlobalScope(wrapped[1] ?? "");
+  return GLOBAL_BRANCH_RE.test(trimmed);
+}
 
 function isGlobalScope(selector: string): boolean {
-  // `selector.split(",")` is sufficient for design-token selectors in
-  // practice — none of the recognised anchors carry commas inside their
-  // own form. Trim each branch before testing.
-  const branches = selector.split(",");
+  const branches = splitTopLevelCommas(selector);
+  if (branches.length === 0) return false;
   for (const branch of branches) {
-    if (!GLOBAL_BRANCH_RE.test(branch.trim())) return false;
+    if (!isGlobalBranch(branch)) return false;
   }
-  return branches.length > 0;
+  return true;
+}
+
+/**
+ * Split on commas that sit at the top level — outside any `(...)` or
+ * `[...]` group. `selector.split(",")` would cut `:is(:root, .dark)` at
+ * the inner comma and falsely reject every shadcn-style dark-mode
+ * declaration.
+ */
+function splitTopLevelCommas(selector: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (let i = 0; i < selector.length; i += 1) {
+    const ch = selector[i] ?? "";
+    if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth -= 1;
+    if (ch === "," && depth === 0) {
+      if (current.trim() !== "") out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim() !== "") out.push(current);
+  return out;
 }
 
 export function buildVarMap(root: Root): Map<string, string> {

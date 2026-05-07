@@ -48,6 +48,23 @@ describe("buildVarMap", () => {
     const vars = buildVarMap(root(':root[data-theme="dim"] { --primary: oklch(0.4 0.2 200); }'));
     expect(vars.get("--primary")).toBe("oklch(0.4 0.2 200)");
   });
+
+  it("accepts :is(...) and :where(...) wrappers around global anchors", () => {
+    // shadcn's current dark-mode pattern. Splitting blindly on commas
+    // would cut `:is(:root, .dark)` at the inner comma and reject the rule.
+    const vars1 = buildVarMap(root(":is(:root, .dark) { --bg: rgb(0 0 0); }"));
+    expect(vars1.get("--bg")).toBe("rgb(0 0 0)");
+
+    const vars2 = buildVarMap(root(":where(:root, .dark) { --fg: rgb(255 255 255); }"));
+    expect(vars2.get("--fg")).toBe("rgb(255 255 255)");
+  });
+
+  it("rejects :is(...) wrappers that contain descendant selectors", () => {
+    // :is(:root, .dark .panel) — the inner .dark .panel branch is not a
+    // global anchor, so the whole rule must be rejected.
+    const vars = buildVarMap(root(":is(:root, .dark .panel) { --bg: rgb(0 0 0); }"));
+    expect(vars.has("--bg")).toBe(false);
+  });
 });
 
 describe("resolveVarChain", () => {
