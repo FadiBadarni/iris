@@ -129,3 +129,24 @@ describe("suggestToken — none", () => {
     expect(suggestToken("bg-[#fa8072]", t).kind).toBe("none");
   });
 });
+
+describe("suggestToken — negative arbitrary spacing", () => {
+  test("-mt-[8px] -> -mt-2 when spacing.2 = 8px", () => {
+    const t = theme([{ name: "spacing.2", value: "8px", type: "spacing" }]);
+    expect(suggestToken("-mt-[8px]", t)).toEqual({
+      kind: "exact",
+      tokenName: "spacing.2",
+      replacement: "-mt-2",
+    });
+  });
+
+  test("-inset-[15px] -> -inset-4 with spacing near match", () => {
+    const t = theme([{ name: "spacing.4", value: "16px", type: "spacing" }]);
+    expect(suggestToken("-inset-[15px]", t)).toEqual({
+      kind: "near",
+      tokenName: "spacing.4",
+      replacement: "-inset-4",
+      delta: 1,
+    });
+  });
+});

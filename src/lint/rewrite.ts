@@ -16,7 +16,8 @@ const SOURCE_RANK: Record<TokenSource, number> = {
 export function suggestToken(className: string, theme: ResolvedTheme): SuggestResult {
   const decomposed = decomposeClass(className);
   if (!decomposed) return { kind: "none" };
-  const { prefix, value, type } = decomposed;
+  const { prefix, value, type, negative } = decomposed;
+  const sign = negative ? "-" : "";
 
   // 1. Exact match in byValue, filtered by type.
   const exact = lookupExact(theme, value, type);
@@ -25,14 +26,14 @@ export function suggestToken(className: string, theme: ResolvedTheme): SuggestRe
     return {
       kind: "exact",
       tokenName: entry.name,
-      replacement: buildReplacement(prefix, entry.name),
+      replacement: buildReplacement(sign, prefix, entry.name),
     };
   }
   if (exact.length > 1) {
     const ordered = exact.slice().sort(compareCandidates);
     const candidates: SuggestCandidate[] = ordered.map((e) => ({
       tokenName: e.name,
-      replacement: buildReplacement(prefix, e.name),
+      replacement: buildReplacement(sign, prefix, e.name),
     }));
     return { kind: "ambiguous", candidates };
   }
@@ -59,7 +60,7 @@ export function suggestToken(className: string, theme: ResolvedTheme): SuggestRe
       return {
         kind: "near",
         tokenName: best.entry.name,
-        replacement: buildReplacement(prefix, best.entry.name),
+        replacement: buildReplacement(sign, prefix, best.entry.name),
         delta: best.delta,
       };
     }
@@ -91,13 +92,14 @@ function lookupExact(theme: ResolvedTheme, value: string, type: TokenType): Toke
   return [];
 }
 
-function buildReplacement(prefix: string, tokenName: string): string {
+function buildReplacement(sign: string, prefix: string, tokenName: string): string {
   // Token name `colors.brand.salmon` → tail `brand-salmon`.
   // The first dotted segment is the namespace (colors / fontSize / spacing /
-  // …); the rest is the class tail with dashes between.
+  // …); the rest is the class tail with dashes between. Sign carries through
+  // for negative arbitrary spacing — `-mt-[8px]` round-trips as `-mt-2`.
   const parts = tokenName.split(".");
   const tail = parts.slice(1).join("-");
-  return `${prefix}-${tail}`;
+  return `${sign}${prefix}-${tail}`;
 }
 
 function compareCandidates(a: TokenEntry, b: TokenEntry): number {

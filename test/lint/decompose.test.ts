@@ -29,6 +29,29 @@ describe("decomposeClass", () => {
     });
   });
 
+  test("captures negative sign on arbitrary spacing", () => {
+    expect(decomposeClass("-mt-[8px]")).toEqual({
+      prefix: "mt",
+      value: "8px",
+      type: "spacing",
+      negative: true,
+    });
+  });
+
+  test("captures negative sign on arbitrary spacing through variants", () => {
+    expect(decomposeClass("md:hover:-inset-[2px]")).toEqual({
+      prefix: "inset",
+      value: "2px",
+      type: "spacing",
+      negative: true,
+    });
+  });
+
+  test("does not produce a negative field for positive classes", () => {
+    const result = decomposeClass("mt-[8px]");
+    expect(result).toEqual({ prefix: "mt", value: "8px", type: "spacing" });
+  });
+
   test("returns null for non-arbitrary classes", () => {
     expect(decomposeClass("bg-muted")).toBeNull();
     expect(decomposeClass("text-sm")).toBeNull();

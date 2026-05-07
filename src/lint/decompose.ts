@@ -6,7 +6,10 @@ import type { TokenType } from "../theme/types.js";
 // from inspecting the value when the prefix is multi-purpose (`text-` is the
 // canonical case — `text-[14px]` is fontSize, `text-[#ccc]` is color).
 
-const ARBITRARY_CLASS = /^([a-z][a-z-]*)-\[([^\]]+)\]$/;
+// Optional leading `-` captures negative arbitrary spacing/inset utilities
+// (`-mt-[8px]`, `-inset-[2px]`). The rewriter prepends the sign back when it
+// builds the replacement class so the suggestion's polarity round-trips.
+const ARBITRARY_CLASS = /^(-?)([a-z][a-z-]*)-\[([^\]]+)\]$/;
 
 const PREFIX_TYPE: Record<string, TokenType> = {
   bg: "color",
@@ -57,6 +60,7 @@ export type ArbitraryClass = {
   prefix: string;
   value: string;
   type: TokenType;
+  negative?: true;
 };
 
 export function decomposeClass(className: string): ArbitraryClass | null {
@@ -64,22 +68,26 @@ export function decomposeClass(className: string): ArbitraryClass | null {
   const leaf = stripVariants(className);
   const m = leaf.match(ARBITRARY_CLASS);
   if (!m) return null;
-  const prefix = m[1] as string;
-  const value = m[2] as string;
+  const sign = m[1] as string;
+  const prefix = m[2] as string;
+  const value = m[3] as string;
+  const negative = sign === "-";
 
+  const out = { prefix, value, type: chooseType(prefix, value) } as ArbitraryClass;
+  if (negative) out.negative = true;
+  return out;
+}
+
+function chooseType(prefix: string, value: string): TokenType {
   // `text-` straddles fontSize and color depending on the value shape. Decide
   // by sniffing the value first — if it's a color, it's a color, otherwise
   // it's a fontSize.
-  if (prefix === "text") {
-    return { prefix, value, type: looksLikeColor(value) ? "color" : "fontSize" };
-  }
-
+  if (prefix === "text") return looksLikeColor(value) ? "color" : "fontSize";
   const declared = PREFIX_TYPE[prefix];
-  if (declared !== undefined) return { prefix, value, type: declared };
-
+  if (declared !== undefined) return declared;
   // No mapping — try to infer from the value as a fallback. Prevents the
   // rewriter from giving up on every novel utility.
-  return { prefix, value, type: inferTypeFromValue(value) };
+  return inferTypeFromValue(value);
 }
 
 function stripVariants(className: string): string {
