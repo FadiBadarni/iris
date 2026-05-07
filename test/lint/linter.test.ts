@@ -19,7 +19,14 @@ function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>):
     list.push(entry);
     byValue.set(entry.value, list);
   }
-  return { version: 4, tokens, byValue, sources: ["test.css"], warnings: [] };
+  return {
+    version: 4,
+    tokens,
+    byValue,
+    sources: ["test.css"],
+    warnings: [],
+    suppressedPrefixes: new Set(),
+  };
 }
 
 describe("lintSource — slice A walking skeleton", () => {

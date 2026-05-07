@@ -13,40 +13,45 @@ const require = createRequire(import.meta.url);
 
 async function main(): Promise<void> {
   const startupCwd = process.cwd();
-  const themeCache = new Map<string, Awaited<ReturnType<typeof parseTheme>>>();
-  const shadcnCache = new Map<string, ShadcnState>();
-  // null = "we tried, the config was missing or broken; don't retry on
-  // every tool call." Daemon-friendly so a malformed config doesn't hammer
-  // the filesystem for the lifetime of the connection.
+
+  // In-flight promise coalescing keyed by resolved project root. A
+  // permanent daemon-level cache for the resolved values would bypass
+  // parseTheme's own mtime cache (src/theme/cache.ts) and pin a stale
+  // theme until restart — codex 5.5 high flagged that as a real BLOCK
+  // during the v0.4 γ review. Inflight maps coalesce concurrent calls
+  // for the same root (cheap) and delete on settle, so the next call
+  // hits parseTheme/parseShadcn fresh and lets their inner caches
+  // judge mtime invalidation themselves.
+  const inflightTheme = new Map<string, Promise<Awaited<ReturnType<typeof parseTheme>>>>();
+  const inflightShadcn = new Map<string, Promise<ShadcnState>>();
+
+  // Config is different — a malformed config shouldn't pound the FS on
+  // every call (daemon, long-lived). Sticky-null cache: tried-and-failed
+  // stays null until restart; tried-and-loaded gets returned. Editing a
+  // broken config requires daemon restart; that's the v0.4 trade.
   const configCache = new Map<string, IrisConfig | null>();
 
   const server = createIrisMcpServer({
     resolveTheme: async (filename, projectRoot) => {
       const root = resolveProjectRoot(filename, projectRoot, startupCwd);
       const key = cacheKey(root);
-      const cached = themeCache.get(key);
-      if (cached) return cached;
-      // parseTheme has its own mtime-keyed cache (src/theme/cache.ts), so this
-      // map is the daemon-level one — keyed by resolved root rather than cwd
-      // so monorepo workspaces don't fight each other.
-      const theme = await parseTheme({ cwd: root });
-      themeCache.set(key, theme);
-      return theme;
+      const existing = inflightTheme.get(key);
+      if (existing) return existing;
+      const p = parseTheme({ cwd: root }).finally(() => inflightTheme.delete(key));
+      inflightTheme.set(key, p);
+      return p;
     },
     resolveShadcn: async (filename, projectRoot) => {
       const root = resolveProjectRoot(filename, projectRoot, startupCwd);
       const key = cacheKey(root);
-      const cached = shadcnCache.get(key);
-      if (cached) return cached;
-      // parseShadcn does its own filesystem walk on every call — cheap
-      // enough that not bothering with mtime invalidation, but expensive
-      // enough that a daemon-level cache by root pays off across calls.
-      // The same resolver answers both lint_source (filename present) and
+      const existing = inflightShadcn.get(key);
+      if (existing) return existing;
+      // The same resolver answers lint_source (filename present) and
       // list_components (filename absent — falls back to projectRoot or
       // startupCwd via resolveProjectRoot).
-      const shadcn = await parseShadcn({ cwd: root });
-      shadcnCache.set(key, shadcn);
-      return shadcn;
+      const p = parseShadcn({ cwd: root }).finally(() => inflightShadcn.delete(key));
+      inflightShadcn.set(key, p);
+      return p;
     },
     resolveConfig: async (filename, projectRoot) => {
       const root = resolveProjectRoot(filename, projectRoot, startupCwd);

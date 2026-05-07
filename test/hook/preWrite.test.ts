@@ -13,7 +13,14 @@ function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>):
     list.push(e);
     byValue.set(e.value, list);
   }
-  return { version: 4, tokens, byValue, sources: ["test.css"], warnings: [] };
+  return {
+    version: 4,
+    tokens,
+    byValue,
+    sources: ["test.css"],
+    warnings: [],
+    suppressedPrefixes: new Set(),
+  };
 }
 
 describe("preWrite hook", () => {

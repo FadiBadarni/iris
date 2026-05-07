@@ -15,7 +15,14 @@ function fakeTheme(entries: Array<Pick<TokenEntry, "name" | "value" | "type">>):
     list.push(e);
     byValue.set(e.value, list);
   }
-  return { version: 4, tokens, byValue, sources: ["test.css"], warnings: [] };
+  return {
+    version: 4,
+    tokens,
+    byValue,
+    sources: ["test.css"],
+    warnings: [],
+    suppressedPrefixes: new Set(),
+  };
 }
 
 async function pairedClient(
@@ -482,6 +489,81 @@ describe("iris MCP server — apply_fix (slice v0.4 β)", () => {
       expect(result.isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
       expect(text).toContain("no tailwind project");
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("iris MCP server — get_token_map (slice v0.4 γ)", () => {
+  test("registers get_token_map in the tool list", async () => {
+    const { client, cleanup } = await pairedClient(fakeTheme([]));
+    try {
+      const result = await client.listTools();
+      const tool = result.tools.find((t) => t.name === "get_token_map");
+      expect(tool).toBeDefined();
+      expect(tool?.description).toBeTruthy();
+      expect(tool?.inputSchema).toMatchObject({
+        type: "object",
+        properties: expect.objectContaining({ projectRoot: expect.any(Object) }),
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns the project's tokens as an array of TokenEntry", async () => {
+    const theme = fakeTheme([
+      { name: "colors.brand.salmon", value: "#fa8072", type: "color" },
+      { name: "fontSize.sm", value: "14px", type: "fontSize" },
+    ]);
+    const { client, cleanup } = await pairedClient(theme);
+    try {
+      const result = await client.callTool({ name: "get_token_map", arguments: {} });
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      const parsed = JSON.parse(text as string) as {
+        tokens: Array<{ name: string; value: string; type: string; source: string; file: string }>;
+      };
+      expect(parsed.tokens).toHaveLength(2);
+      const salmon = parsed.tokens.find((t) => t.name === "colors.brand.salmon");
+      expect(salmon).toBeDefined();
+      expect(salmon?.value).toBe("#fa8072");
+      expect(salmon?.type).toBe("color");
+      expect(salmon?.source).toBe("v4-theme");
+      expect(salmon?.file).toBe("test.css");
+      expect(result.isError).toBeFalsy();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("structuredContent mirrors the JSON-encoded text payload", async () => {
+    const theme = fakeTheme([{ name: "colors.muted", value: "#f3f4f6", type: "color" }]);
+    const { client, cleanup } = await pairedClient(theme);
+    try {
+      const result = await client.callTool({ name: "get_token_map", arguments: {} });
+      const sc = (result as { structuredContent?: { tokens: Array<{ name: string }> } })
+        .structuredContent;
+      expect(sc?.tokens.map((t) => t.name)).toEqual(["colors.muted"]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns empty tokens (not an error) when resolveTheme throws", async () => {
+    // Querying a non-tailwind project should answer cleanly with [] so
+    // the AI falls through to default Tailwind classes rather than
+    // treating "no tokens" as a failure. Different posture from
+    // lint_source — there a missing tailwind project IS an error.
+    const { client, cleanup } = await pairedClient(async () => {
+      throw new Error("no tailwind project at this root");
+    });
+    try {
+      const result = await client.callTool({ name: "get_token_map", arguments: {} });
+      expect(result.isError).toBeFalsy();
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      const parsed = JSON.parse(text as string) as { tokens: unknown[] };
+      expect(parsed.tokens).toEqual([]);
     } finally {
       await cleanup();
     }

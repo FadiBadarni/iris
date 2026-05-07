@@ -18,7 +18,10 @@ import type { IrisLintMessage } from "../lint/types.js";
 import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
 
-export type ResolveTheme = (filename: string, projectRoot?: string) => Promise<ResolvedTheme>;
+// `filename` is optional because get_token_map has no file context — the
+// resolver should fall back to projectRoot or the server's cwd. lint_source
+// and apply_fix always pass it.
+export type ResolveTheme = (filename?: string, projectRoot?: string) => Promise<ResolvedTheme>;
 
 // Optional injection. Returning undefined is a valid signal that this
 // project doesn't have a shadcn install — the linter just skips the rule.
@@ -122,6 +125,22 @@ const APPLY_FIX_INPUT_SCHEMA = {
 const APPLY_FIX_DESCRIPTION =
   "Lint a JSX/TSX source string and apply iris's exact + near match suggestions in place. Returns { source, applied, remaining } where source is the rewritten code, applied is the number of fixes applied, and remaining contains violations the engine had no applicable fix for (ambiguous matches, no token match, or rules without a fixer). For `iris/no-reinventing-shadcn` entries in `remaining`, manually import the referenced component from its canonical path instead of redefining it locally.";
 
+const GET_TOKEN_MAP_TOOL_NAME = "get_token_map";
+
+const GET_TOKEN_MAP_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    projectRoot: {
+      type: "string",
+      description:
+        "Optional override for the project root used to locate tailwind.config or globals.css @theme. In monorepos, point this at the package whose tokens you want listed.",
+    },
+  },
+} as const;
+
+const GET_TOKEN_MAP_DESCRIPTION =
+  "List the project's resolved Tailwind design tokens. Each entry is { name, value, type, source, file } where type is one of color, spacing, fontSize, fontFamily, fontWeight, borderRadius, lineHeight, letterSpacing, boxShadow, screen, other and source identifies whether the token came from a v3 config, a v4 @theme block, the v4 config bridge, or Tailwind's defaults. Call this before generating Tailwind classes so you can reach for project tokens (`bg-brand-salmon`, `text-sm`) instead of arbitrary values.";
+
 export function createIrisMcpServer(opts: CreateServerOpts): Server {
   const server = new Server({ name: "iris", version: "0.3.0" }, { capabilities: { tools: {} } });
 
@@ -142,6 +161,11 @@ export function createIrisMcpServer(opts: CreateServerOpts): Server {
         description: APPLY_FIX_DESCRIPTION,
         inputSchema: APPLY_FIX_INPUT_SCHEMA,
       },
+      {
+        name: GET_TOKEN_MAP_TOOL_NAME,
+        description: GET_TOKEN_MAP_DESCRIPTION,
+        inputSchema: GET_TOKEN_MAP_INPUT_SCHEMA,
+      },
     ],
   }));
 
@@ -154,6 +178,9 @@ export function createIrisMcpServer(opts: CreateServerOpts): Server {
     }
     if (req.params.name === APPLY_FIX_TOOL_NAME) {
       return handleApplyFix(req.params.arguments, opts);
+    }
+    if (req.params.name === GET_TOKEN_MAP_TOOL_NAME) {
+      return handleGetTokenMap(req.params.arguments, opts);
     }
     return errorResult(`Unknown tool: ${req.params.name}`);
   });
@@ -244,6 +271,34 @@ async function handleListComponents(rawArgs: unknown, opts: CreateServerOpts) {
 
   const components = state ? [...state.components.values()] : [];
   const payload = { components };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    structuredContent: payload,
+  };
+}
+
+async function handleGetTokenMap(rawArgs: unknown, opts: CreateServerOpts) {
+  const args = rawArgs as { projectRoot?: unknown } | undefined;
+  const projectRoot = typeof args?.projectRoot === "string" ? args.projectRoot : undefined;
+
+  // get_token_map is a discovery query — "are there tokens here?" If the
+  // project doesn't have a tailwind config the AI should fall through to
+  // default Tailwind classes, not treat the absence as a failure. Same
+  // posture as list_components (vs lint_source, where missing config IS
+  // an error since lint_source needs a theme to do anything useful).
+  let theme: ResolvedTheme;
+  try {
+    theme = await opts.resolveTheme(undefined, projectRoot);
+  } catch {
+    const empty = { tokens: [] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(empty) }],
+      structuredContent: empty,
+    };
+  }
+
+  const tokens = [...theme.tokens.values()];
+  const payload = { tokens };
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload,
