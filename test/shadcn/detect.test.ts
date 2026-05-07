@@ -49,4 +49,34 @@ describe("parseShadcn", () => {
     expect(state.components.has("Card")).toBe(true);
     expect(state.components.has("CardHeader")).toBe(false);
   });
+
+  test("ignores barrels, tests, stories, and type declarations", async () => {
+    // shadcn-basic has index.tsx, button.test.tsx, and button.d.ts colocated
+    // with the real components. None should surface — the codex 5.5 review
+    // flagged that an unfiltered glob would emit "Index", "Button.test",
+    // and "Button.d" as bogus components.
+    const state = await parseShadcn({
+      cwd: resolve(here, "..", "fixtures", "shadcn-basic"),
+    });
+    expect(state.components.has("Index")).toBe(false);
+    expect(state.components.has("Button.test")).toBe(false);
+    expect(state.components.has("Button.d")).toBe(false);
+    // Map size stays 2 (Button + Card) — support files don't pollute it.
+    expect(state.components.size).toBe(2);
+  });
+
+  test("emits multi-shadcn warning when more than one components/ui directory exists", async () => {
+    // shadcn-monorepo has two: apps/web/components/ui and
+    // packages/ui/src/components/ui. Shallowest wins; the other gets
+    // surfaced as a warning so users with monorepos know to disambiguate.
+    const state = await parseShadcn({
+      cwd: resolve(here, "..", "fixtures", "shadcn-monorepo"),
+    });
+    expect(state.warnings).toHaveLength(1);
+    expect(state.warnings[0]?.kind).toBe("multi-shadcn");
+    // Only the winning dir contributes to the components map.
+    expect(state.components.size).toBe(1);
+    const button = state.components.get("Button");
+    expect(button?.filePath).toMatch(/apps[/\\]web[/\\]components[/\\]ui[/\\]button\.tsx$/);
+  });
 });
