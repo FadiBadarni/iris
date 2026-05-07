@@ -21,4 +21,10 @@ describe("extractClassFromMessage", () => {
   test("returns null on empty input", () => {
     expect(extractClassFromMessage("")).toBeNull();
   });
+
+  test("pulls the class out of a no-custom-classname violation", () => {
+    expect(
+      extractClassFromMessage("Classname 'bg-totally-fake' is not a Tailwind CSS class!"),
+    ).toBe("bg-totally-fake");
+  });
 });

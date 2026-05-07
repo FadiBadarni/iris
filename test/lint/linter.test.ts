@@ -101,3 +101,49 @@ describe("lintSource — slice C.1 semantic rewriting", () => {
     expect(messages[0]?.suggestion).toBeUndefined();
   });
 });
+
+describe("lintSource — slice C.2 no-custom-classname", () => {
+  test("flags a class that isn't a Tailwind utility or a project token", async () => {
+    const theme = fakeTheme([{ name: "colors.muted", value: "#f3f4f6", type: "color" }]);
+    const source = `export const X = () => <div className="bg-totally-fake-token" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    const customClassMessages = messages.filter(
+      (m) => m.ruleId === "tailwindcss/no-custom-classname",
+    );
+    expect(customClassMessages).toHaveLength(1);
+    expect(customClassMessages[0]?.classname).toBe("bg-totally-fake-token");
+  });
+
+  test("does not flag a built-in Tailwind utility (theme.extend preserves defaults)", async () => {
+    const theme = fakeTheme([]);
+    const source = `export const X = () => <div className="bg-blue-500" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    expect(messages).toEqual([]);
+  });
+
+  test("does not flag a project token from the synthesized config", async () => {
+    const theme = fakeTheme([{ name: "colors.muted", value: "#f3f4f6", type: "color" }]);
+    const source = `export const X = () => <div className="bg-muted" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    expect(messages).toEqual([]);
+  });
+
+  test("no-custom-classname is OFF when no theme is provided (slice A behavior preserved)", async () => {
+    const source = `export const X = () => <div className="bg-totally-fake-token" />;`;
+    const messages = await lintSource(source, "Hero.tsx");
+    expect(messages).toEqual([]);
+  });
+
+  test("locks no-custom-classname template — fails loud if upstream changes", async () => {
+    // Twin to the slice B snapshot for no-arbitrary-value. extract.ts assumes
+    // the class is the first single-quoted segment in the message; if the
+    // upstream template moves the class out of that position this fires.
+    const theme = fakeTheme([]);
+    const source = `export const X = () => <div className="bg-foo-not-a-real-token" />;`;
+    const messages = await lintSource(source, "Hero.tsx", theme);
+    const customClassMessage = messages.find((m) => m.ruleId === "tailwindcss/no-custom-classname");
+    expect(customClassMessage?.message).toBe(
+      "Classname 'bg-foo-not-a-real-token' is not a Tailwind CSS class!",
+    );
+  });
+});

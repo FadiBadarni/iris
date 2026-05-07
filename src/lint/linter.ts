@@ -3,13 +3,16 @@ import { Linter } from "eslint";
 import tailwindPlugin from "eslint-plugin-tailwindcss";
 import type { ResolvedTheme } from "../theme/types.js";
 import { DEFAULT_ALLOWLIST, isAllowlisted } from "./allowlist.js";
+import { synthesizeV3Config } from "./config-synth.js";
 import { extractClassFromMessage } from "./extract.js";
 import { suggestToken } from "./rewrite.js";
 import type { IrisLintMessage } from "./types.js";
 
 const linter = new Linter({ configType: "flat" });
 
-const config: Linter.FlatConfig[] = [
+// Slice A baseline — runs without a theme. Only no-arbitrary-value, which is
+// regex-based and ignores the resolved Tailwind config entirely.
+const baseConfig: Linter.FlatConfig[] = [
   {
     files: ["**/*.{ts,tsx,js,jsx,mdx}"],
     languageOptions: {
@@ -31,12 +34,37 @@ const config: Linter.FlatConfig[] = [
   },
 ];
 
+// Slice C.2 path — when a theme is provided, layer in no-custom-classname
+// against a synthesized Tailwind config so the plugin can validate utilities
+// against project tokens + Tailwind defaults.
+const themedConfigCache = new WeakMap<ResolvedTheme, Linter.FlatConfig[]>();
+
+function configFor(theme: ResolvedTheme): Linter.FlatConfig[] {
+  const cached = themedConfigCache.get(theme);
+  if (cached !== undefined) return cached;
+  const tailwindConfig = synthesizeV3Config(theme);
+  const base = baseConfig[0] as Linter.FlatConfig;
+  const cfg: Linter.FlatConfig[] = [
+    {
+      ...base,
+      settings: { tailwindcss: { config: tailwindConfig } },
+      rules: {
+        "tailwindcss/no-arbitrary-value": "error",
+        "tailwindcss/no-custom-classname": "warn",
+      },
+    },
+  ];
+  themedConfigCache.set(theme, cfg);
+  return cfg;
+}
+
 export async function lintSource(
   source: string,
   filename: string,
   theme?: ResolvedTheme,
 ): Promise<IrisLintMessage[]> {
-  const raw = linter.verify(source, config, { filename });
+  const cfg = theme === undefined ? baseConfig : configFor(theme);
+  const raw = linter.verify(source, cfg, { filename });
   const out: IrisLintMessage[] = [];
   for (const m of raw) {
     const msg = toIrisMessage(m, theme);
