@@ -84,7 +84,7 @@ const LIST_COMPONENTS_DESCRIPTION =
   "List the shadcn/ui components installed in the project. Each entry is { name, filePath, importPath }. Call this before writing JSX so you can import existing components instead of reinventing them.";
 
 export function createIrisMcpServer(opts: CreateServerOpts): Server {
-  const server = new Server({ name: "iris", version: "0.2.1" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "iris", version: "0.3.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [

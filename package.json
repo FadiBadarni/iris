@@ -1,6 +1,6 @@
 {
   "name": "iris-cc",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "MCP server and CLI that grounds AI coding assistants in your Next.js + Tailwind design system",
   "type": "module",
   "license": "MIT",

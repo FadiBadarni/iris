@@ -2,6 +2,39 @@
 
 All notable changes to iris are documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-07
+
+shadcn awareness. iris now detects installed shadcn/ui components, flags reinvented locals, and exposes the component list to AI assistants over MCP. Minor bump (not patch) because the public surface grows: new `parseShadcn` export, new `ShadcnState`/`ShadcnComponent`/`ShadcnWarning` types, a fourth optional argument on `lintSource`, and a second MCP tool. The existing `lintSource(source, filename, theme?)` signature stays valid — v0.2.x users get no surprises if they don't opt in.
+
+### Added
+
+- **`parseShadcn({ cwd })`.** Reads `components.json` (when present) for the `aliases.ui` path; otherwise globs `**/components/ui/*.{ts,tsx}`. Returns a `ShadcnState` with a Map of canonical names → `{ filePath, importPath }`. Filters support files (`index.tsx`, `*.test.tsx`, `*.d.ts`, `*.stories.tsx`) so the Map only contains real components. PascalCases kebab-case stems (`alert-dialog.tsx` → `AlertDialog`). Surfaces `no-shadcn` and `multi-shadcn` warnings rather than throwing.
+- **`iris/no-reinventing-shadcn` lint rule.** Warns when a file declares a function or const named after an installed shadcn component without already importing it from the canonical alias path. Visitor coverage matches what AI assistants actually emit: function declarations (incl. default-exported), arrow / function-expression consts, and call-expression wrappers (`forwardRef(...)`, `memo(...)` — the shadcn-canonical shape). Suppression on the canonical implementation file and on existing value imports; type-only imports do not suppress.
+- **`list_components` MCP tool.** Second tool exposed by `iris-mcp`: `list_components({ projectRoot? }) → { components: ShadcnComponent[] }`. Lets an AI proactively query installed components before generating JSX. Empty array (not an error) on non-shadcn projects so the AI can fall through to default generation rather than treating "no shadcn" as a failure.
+- **`lintSource` accepts a fourth optional `shadcn?: ShadcnState` argument.** When provided, the rule registers under the `iris/` namespace alongside the wrapped `tailwindcss/*` rules. Cached per ShadcnState by reference identity so swapping shadcn states between calls doesn't serve a stale config.
+- **CLI / hook / MCP auto-wire shadcn detection.** `npx iris lint`, `iris-hook`, and `iris-mcp` all call `parseShadcn` for the inferred project root and thread the state into `lintSource`. Hook stays warning-aware: shadcn reinventions surface as coaching context (one-line `iris warn [multi-shadcn]: ...` for monorepo ambiguity, `Reinventing <Button>...` from the lint pass) without blocking the tool call.
+
+### Changed
+
+- **`createIrisMcpServer` `CreateServerOpts`.** New optional `resolveShadcn` injection, called both during `lint_source` (for the rule) and `list_components` (for the tool payload). Errors are swallowed on the lint path (a flaky shadcn detector should never break linting) and surfaced via `isError: true` on `list_components` (where shadcn is the entire point of the call).
+- **MCP `lintSource` handler accepts `physicalFilename`.** New two-channel filename pattern: `filename` is set to the basename so ESLint's flat-config glob matches Windows-absolute paths with drive letters; `physicalFilename` carries the full forward-slash path through to rules that need it. The shadcn rule reads `physicalFilename ?? filename` so canonical-file suppression compares apples to apples against `ShadcnComponent.filePath`.
+- **Embedded MCP server identity.** `Server({ name: "iris", version: "0.2.1" })` → `"0.3.0"` so `tools/list` responses advertise the right version.
+
+### Risks
+
+- **Custom (non-shadcn) `components/ui/` directories falsely classified.** Accepted — the rule still benefits ("don't reinvent your own local component"). v0.4 can read each file's header for shadcn's marker comment if needed.
+- **Monorepos with multiple `components/ui/` dirs.** Shallowest wins (depth-first, then lexicographic); others surface as `multi-shadcn` warnings. Pass `projectRoot` to scope detection.
+- **No CLI/hook/MCP opt-out flag for shadcn detection.** Programmatic callers can opt out by omitting the fourth `lintSource` argument. A config-driven opt-out can land in v0.4 if there's demand.
+
+### Deferred to v0.4+
+
+- `--fix` rewriter that imports the shadcn component (needs surrounding-file rewriting; semver-major risk)
+- Structural similarity matching (component looks like a Button without being named Button)
+- Detection of non-shadcn libraries (Radix, Headless UI)
+- `add_component` MCP tool (shells to `npx shadcn add`)
+- iris.config.ts opt-out / severity overrides for the shadcn rule
+- (Carry-overs from v0.2.2: persistent hook process, theme file watcher, additional MCP tools)
+
 ## [0.2.2] — 2026-05-07
 
 Polish release closing three CHANGELOG-deferred items from v0.2.1. No breaking changes; the public contract (`lintSource`, `IrisLintMessage`, `SuggestResult`) is unchanged.
