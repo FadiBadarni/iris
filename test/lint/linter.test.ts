@@ -30,6 +30,17 @@ describe("lintSource — slice A walking skeleton", () => {
     const messages = await lintSource(source, "Hero.tsx");
     expect(messages).toEqual([]);
   });
+
+  test("matches files with Windows-absolute paths (backslashes)", async () => {
+    // Regression: ESLint flat-config files glob is forward-slash only.
+    // A real Claude Code session on Windows passes
+    // `C:\Users\…\Hero.tsx`; without normalization the glob misses and
+    // the linter silently returns zero messages.
+    const source = `export const X = () => <div className="bg-[#f3f4f6]" />;`;
+    const messages = await lintSource(source, String.raw`C:\Users\me\proj\app\Hero.tsx`);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.ruleId).toBe("tailwindcss/no-arbitrary-value");
+  });
 });
 
 describe("lintSource — slice B allowlist + extract", () => {

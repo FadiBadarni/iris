@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import tsParser from "@typescript-eslint/parser";
 import { Linter } from "eslint";
 import tailwindPlugin from "eslint-plugin-tailwindcss";
@@ -70,7 +71,14 @@ export async function lintSource(
   theme?: ResolvedTheme,
 ): Promise<IrisLintMessage[]> {
   const cfg = theme === undefined ? baseConfig : configFor(theme);
-  const raw = linter.verify(source, cfg, { filename });
+  // ESLint's flat-config `files: ["**/*.{ts,tsx,…}"]` glob matches against
+  // forward-slash paths and gets confused by absolute paths with drive
+  // letters (`C:/Users/…/Hero.tsx`). Pass just the basename — the filename
+  // is metadata for ESLint, not a path resolution input. Line/column come
+  // from the source content; the caller already knows the original
+  // filename and can attach it to the IrisLintMessage downstream.
+  const ruleMatchName = basename(filename.replace(/\\/g, "/"));
+  const raw = linter.verify(source, cfg, { filename: ruleMatchName });
   const out: IrisLintMessage[] = [];
   for (const m of raw) {
     const msg = toIrisMessage(m, theme);
