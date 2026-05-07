@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { relative, resolve as resolvePath } from "node:path";
 import { cac } from "cac";
 import fastGlob from "fast-glob";
 import { parseTheme, version } from "./index.js";
+import { applyFixes } from "./lint/fix.js";
 import { type FileResult, formatHuman, formatJson, formatSarif } from "./lint/format.js";
 import { lintSource } from "./lint/linter.js";
+import type { IrisLintMessage } from "./lint/types.js";
 
 export type LintFormat = "human" | "json" | "sarif";
 
@@ -69,11 +71,30 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
 
   const results: FileResult[] = [];
   let errorCount = 0;
+  let fixedFileCount = 0;
+  let fixedCount = 0;
   for (const abs of files) {
     const source = await readFile(abs, "utf8");
     const filename = relative(cwd, abs).replace(/\\/g, "/");
     const messages = await lintSource(source, filename, theme);
     if (messages.length === 0) continue;
+
+    if (options.fix === true) {
+      const fixed = applyFixes(source, messages);
+      if (fixed !== source) {
+        await writeFile(abs, fixed, "utf8");
+        fixedFileCount += 1;
+        const remaining = messages.filter((m) => !isFixable(m));
+        fixedCount += messages.length - remaining.length;
+        if (remaining.length === 0) continue;
+        results.push({ filename, messages: remaining });
+        for (const m of remaining) {
+          if (m.severity === "error") errorCount += 1;
+        }
+        continue;
+      }
+    }
+
     results.push({ filename, messages });
     for (const m of messages) {
       if (m.severity === "error") errorCount += 1;
@@ -83,7 +104,17 @@ export async function runLint(paths: string[], options: LintOptions, io: LintIO)
   const out = renderOutput(results, format);
   if (out.length > 0) io.out(out.replace(/\n$/, ""));
 
+  if (options.fix === true && fixedCount > 0) {
+    io.err(
+      `iris: rewrote ${fixedCount} class${fixedCount === 1 ? "" : "es"} in ${fixedFileCount} file${fixedFileCount === 1 ? "" : "s"}`,
+    );
+  }
+
   return errorCount > 0 ? 1 : 0;
+}
+
+function isFixable(m: IrisLintMessage): boolean {
+  return m.suggestion?.kind === "exact" || m.suggestion?.kind === "near";
 }
 
 function renderOutput(results: FileResult[], format: LintFormat): string {

@@ -1,4 +1,6 @@
-import { dirname, resolve } from "node:path";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type LintIO, runLint } from "../src/cli.js";
@@ -94,5 +96,35 @@ describe("iris cli", () => {
     expect(parsed.version).toBe("2.1.0");
     expect(parsed.runs[0].tool.driver.name).toBe("iris");
     expect(parsed.runs[0].results[0].ruleId).toBe("tailwindcss/no-arbitrary-value");
+  });
+
+  it("runLint --fix rewrites the source in place and exits 0", async () => {
+    // Copy the lint-cli fixture into a tmp dir so the real fixture isn't
+    // mutated between test runs.
+    const fixtureSrc = resolve(here, "fixtures", "lint-cli");
+    const sandbox = await mkdtemp(join(tmpdir(), "iris-fix-"));
+    try {
+      await copyFile(join(fixtureSrc, "package.json"), join(sandbox, "package.json"));
+      await copyFile(join(fixtureSrc, "tailwind.config.ts"), join(sandbox, "tailwind.config.ts"));
+      await copyFile(join(fixtureSrc, "Hero.tsx"), join(sandbox, "Hero.tsx"));
+
+      const io = captureIO();
+      const code = await runLint(["**/*.tsx"], { cwd: sandbox, fix: true }, io);
+
+      expect(code).toBe(0);
+      const after = await readFile(join(sandbox, "Hero.tsx"), "utf8");
+      // The className attribute itself must no longer carry the arbitrary
+      // value — file comments may still mention it as documentation, so we
+      // anchor the assertion to the className= attribute.
+      const classAttr = after.match(/className="([^"]+)"/);
+      expect(classAttr?.[1]).not.toContain("bg-[#fa8072]");
+      expect(classAttr?.[1]).toContain("bg-brand-salmon");
+      // Allowlisted class is untouched.
+      expect(classAttr?.[1]).toContain("bg-[url(/hero.jpg)]");
+      // CLI surfaces a one-line summary on stderr.
+      expect(io.stderr).toMatch(/rewrote 1 class.+1 file/);
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
   });
 });
