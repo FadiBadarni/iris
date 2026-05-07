@@ -27,7 +27,8 @@
   },
   "packageManager": "pnpm@9.15.0",
   "bin": {
-    "iris": "./dist/cli.js"
+    "iris": "./dist/cli.js",
+    "iris-hook": "./dist/hook/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

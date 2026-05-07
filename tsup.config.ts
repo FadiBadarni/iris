@@ -5,6 +5,7 @@ export default defineConfig({
     index: "src/index.ts",
     cli: "src/cli.ts",
     "lint/index": "src/lint/index.ts",
+    "hook/cli": "src/hook/cli.ts",
   },
   format: ["esm"],
   target: "node18",
