@@ -19,14 +19,51 @@ import { parseTheme, version } from "../index.js";
 import { parseShadcn } from "../shadcn/detect.js";
 import type { ShadcnState } from "../shadcn/types.js";
 import { clearCache as clearThemeCache } from "../theme/cache.js";
-import { type DaemonLock, clearLock, writeLock } from "./lock.js";
+import { type DaemonLock, clearLock, isPidAlive, readLock, writeLock } from "./lock.js";
 import { createIrisDaemon } from "./server.js";
+import { isHealthy } from "./spawn.js";
 import { createDaemonWatchers } from "./watchers.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 async function main(): Promise<void> {
+  // Dispatch by subcommand. The hook spawns `iris-daemon --project-root <p>`
+  // (no subcommand → run the daemon). Operators get `status` and `stop`
+  // for triage. Subcommand parsing skips known flag-with-value pairs so
+  // `iris-daemon --project-root /x status` parses correctly (cmd =
+  // "status", projectRoot = /x), and rejects unknown positional args
+  // with a usage line so a typo doesn't silently start the daemon.
+  const argv = process.argv.slice(2);
   const projectRoot = resolvePath(parseArg("--project-root") ?? process.cwd());
+  const cmd = parseSubcommand(argv);
+
+  if (cmd === "status") return await statusCommand(projectRoot);
+  if (cmd === "stop") return await stopCommand(projectRoot);
+  if (cmd === "") return await runDaemon(projectRoot);
+
+  process.stderr.write(`iris-daemon: unknown command \`${cmd}\`\n`);
+  process.stderr.write("usage: iris-daemon [status|stop] [--project-root <path>]\n");
+  process.exit(1);
+}
+
+function parseSubcommand(argv: readonly string[]): string {
+  // Known flags that take a value on the next arg. We skip those pairs
+  // when scanning for the positional subcommand.
+  const FLAGS_WITH_VALUE = new Set(["--project-root"]);
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === undefined) continue;
+    if (FLAGS_WITH_VALUE.has(a)) {
+      i += 1; // skip the value
+      continue;
+    }
+    if (a.startsWith("--")) continue;
+    return a;
+  }
+  return "";
+}
+
+async function runDaemon(projectRoot: string): Promise<void> {
   const token = randomBytes(32).toString("hex");
   const startedAt = new Date();
 
@@ -141,6 +178,83 @@ async function main(): Promise<void> {
   }
   // server.listen resolved already; the http.Server keeps the event loop
   // open until the client disconnects or we close it.
+}
+
+async function statusCommand(projectRoot: string): Promise<void> {
+  const lock = await readLock(projectRoot);
+  if (!lock) {
+    process.stdout.write(`iris-daemon: not running for ${projectRoot}\n`);
+    return;
+  }
+  if (!(await isHealthy(lock))) {
+    process.stdout.write(
+      `iris-daemon: lock present but stale (pid=${lock.pid}, port=${lock.port}); next iris-hook call will respawn\n`,
+    );
+    return;
+  }
+  const startedAt = new Date(lock.startedAt);
+  const uptimeS = Math.round((Date.now() - startedAt.getTime()) / 1000);
+  process.stdout.write(
+    `iris-daemon: running for ${projectRoot}\n` +
+      `  pid=${lock.pid}\n` +
+      `  port=${lock.port}\n` +
+      `  version=${lock.version}\n` +
+      `  startedAt=${lock.startedAt}\n` +
+      `  uptime=${uptimeS}s\n`,
+  );
+}
+
+async function stopCommand(projectRoot: string): Promise<void> {
+  const lock = await readLock(projectRoot);
+  if (!lock) {
+    process.stdout.write(`iris-daemon: not running for ${projectRoot}\n`);
+    return;
+  }
+  // Identity check via /health: a stale lock whose PID was reused by an
+  // unrelated process must NOT receive our SIGTERM. isHealthy verifies
+  // the listener returns the same pid + version as the lock; if it
+  // doesn't, we treat the lock as stale and clean up without signaling.
+  // Codex 5.5 high flagged the previous "isPidAlive only" check as a
+  // BLOCK on the v0.5 γ review.
+  if (!(await isHealthy(lock))) {
+    await clearLock(projectRoot, lock);
+    process.stdout.write(`iris-daemon: cleared stale lock for pid ${lock.pid}\n`);
+    return;
+  }
+  try {
+    process.kill(lock.pid, "SIGTERM");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // ESRCH: the process exited between our isHealthy probe and our
+    // SIGTERM. Same end state as "already dead" — clear the lock and
+    // succeed instead of reporting a false failure.
+    if (code === "ESRCH") {
+      await clearLock(projectRoot, lock);
+      process.stdout.write(`iris-daemon: cleared stale lock for pid ${lock.pid}\n`);
+      return;
+    }
+    process.stderr.write(
+      `iris-daemon: failed to signal pid ${lock.pid}: ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+    return;
+  }
+  process.stdout.write(`iris-daemon: SIGTERM sent to pid ${lock.pid}\n`);
+  // Wait for the daemon to actually exit. On POSIX, its signal handler
+  // runs shutdown() which clears the lock; on Windows SIGTERM is treated
+  // as SIGKILL (no handler runs) so the daemon dies without cleaning up
+  // its lock — we do it from here once the PID is gone. Either way the
+  // post-condition is identical: process gone, lock cleared.
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(lock.pid)) {
+      await clearLock(projectRoot, lock);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  process.stderr.write(`iris-daemon: pid ${lock.pid} did not exit within 3s of SIGTERM\n`);
 }
 
 function parseArg(name: string): string | undefined {

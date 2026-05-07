@@ -8,11 +8,15 @@ const repoRoot = resolve(here, "..", "..");
 const fixture = resolve(here, "..", "fixtures", "lint-cli");
 const cliPath = resolve(repoRoot, "dist", "hook", "cli.js");
 
-function runHook(stdinJson: string): Promise<{ code: number; stdout: string; stderr: string }> {
+function runHook(
+  stdinJson: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolveOuter) => {
     const child = spawn("node", [cliPath], {
       cwd: fixture,
       stdio: ["pipe", "pipe", "pipe"],
+      env: env ? { ...process.env, ...env } : process.env,
     });
     let stdout = "";
     let stderr = "";
@@ -75,5 +79,25 @@ describe("iris-hook CLI (e2e)", () => {
     const r = await runHook("not json");
     expect(r.code).toBe(0);
     expect(r.stdout.trim()).toBe("");
+  });
+
+  test("IRIS_NO_DAEMON=1 forces in-process path and still blocks correctly", async () => {
+    // Opt-out path: skip the daemon entirely. The lint should still
+    // produce the same block decision via the in-process fallback —
+    // proves the env var works AND that fallback parity holds.
+    const event = {
+      tool_name: "Write",
+      tool_input: {
+        file_path: resolve(fixture, "Hero.tsx"),
+        content: '<div className="bg-[#fa8072]" />',
+      },
+    };
+    const r = await runHook(JSON.stringify(event), { IRIS_NO_DAEMON: "1" });
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.stdout) as { decision?: string; reason?: string };
+    expect(parsed.decision).toBe("block");
+    expect(parsed.reason).toContain("bg-brand-salmon");
+    // No "daemon path failed" stderr — opt-out is silent, not a failure.
+    expect(r.stderr).not.toMatch(/daemon path failed/);
   });
 });

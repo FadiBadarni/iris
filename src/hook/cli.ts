@@ -64,27 +64,48 @@ async function main(): Promise<void> {
 
   let decision: HookDecision = null;
 
-  // Daemon path: detect-or-spawn an iris-daemon for this project root and
-  // POST the lint request. Headline win: daemon holds warm theme/shadcn/
-  // config caches, so the warm-call latency drops below the <200ms budget
-  // CLAUDE.md set for the hook (cold startup pays the spawn cost once).
-  try {
-    const lock = await getOrSpawnDaemon(cwd, { expectedVersion: version });
-    const messages = await lintViaDaemon(lock, {
-      source: input.source,
-      filename: input.filename,
-      projectRoot: cwd,
-    });
-    decision = decideFromMessages(input.filename, messages);
-  } catch (daemonErr) {
+  // Opt-out: IRIS_NO_DAEMON=1 forces the in-process path silently.
+  // Useful for debugging the daemon, sandboxed environments without
+  // process-spawn permission, or producing a clean baseline for an
+  // issue report. Empty string, "0", and the case-insensitive
+  // "false"/"no"/"off" strings all mean "use the daemon" — anything
+  // else opts out. Mirrors common Unix env-var conventions so
+  // IRIS_NO_DAEMON=false doesn't unexpectedly opt out.
+  const noDaemon = isTruthyEnv(process.env.IRIS_NO_DAEMON);
+
+  let daemonErr: unknown;
+  if (!noDaemon) {
+    // Daemon path: detect-or-spawn an iris-daemon for this project root
+    // and POST the lint request. Headline win: daemon holds warm
+    // theme/shadcn/config caches, so the warm-call latency drops below
+    // the <200ms budget CLAUDE.md set for the hook (cold startup pays
+    // the spawn cost once).
+    try {
+      const lock = await getOrSpawnDaemon(cwd, { expectedVersion: version });
+      const messages = await lintViaDaemon(lock, {
+        source: input.source,
+        filename: input.filename,
+        projectRoot: cwd,
+      });
+      decision = decideFromMessages(input.filename, messages);
+    } catch (err) {
+      daemonErr = err;
+    }
+  }
+
+  if (noDaemon || daemonErr) {
     // Fallback path: in-process resolution. Slower but guarantees the
     // hook never blocks Claude Code on a daemon hiccup. Surface the
-    // daemon error to stderr (visible in `claude --debug`) for triage.
-    process.stderr.write(
-      `iris-hook: daemon path failed, falling back to in-process: ${
-        daemonErr instanceof Error ? daemonErr.message : String(daemonErr)
-      }\n`,
-    );
+    // daemon error to stderr (visible in `claude --debug`) for triage —
+    // but only when we tried the daemon and it failed; opt-out is
+    // intentional and stays silent.
+    if (daemonErr) {
+      process.stderr.write(
+        `iris-hook: daemon path failed, falling back to in-process: ${
+          daemonErr instanceof Error ? daemonErr.message : String(daemonErr)
+        }\n`,
+      );
+    }
     try {
       const theme = await parseTheme({ cwd });
       const shadcn = await parseShadcn({ cwd });
@@ -111,6 +132,13 @@ async function main(): Promise<void> {
   if (decision !== null) {
     process.stdout.write(JSON.stringify(decision));
   }
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const v = value.trim().toLowerCase();
+  if (v === "" || v === "0" || v === "false" || v === "no" || v === "off") return false;
+  return true;
 }
 
 const TAILWIND_CONFIG_NAMES = [

@@ -1,6 +1,6 @@
 # iris
 
-> **Status: v0.3.0 is tagged on `main`; v0.4 is in progress — `iris.config.ts` user customization, plus `apply_fix` and `get_token_map` MCP tools have landed. The npm publish lands once v0.4 ε cuts; until then, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.**
+> **Status: v0.4.0 is on npm (`iris-cc`); v0.5 is in progress — persistent `iris-daemon` for sub-200ms hook latency has landed on `main`. The v0.5 publish lands once ε cuts; until then, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
 
@@ -12,7 +12,7 @@ iris reads your Tailwind config or `globals.css @theme` block, learns your proje
 
 - A **CLI** (`npx iris lint`) that flags arbitrary Tailwind values and suggests the correct token. Wraps `eslint-plugin-tailwindcss` and adds full Tailwind v4 `@theme` parsing, semantic rewriting, and a sane allowlist for legitimate arbitrary values like `bg-[url(...)]` and `grid-cols-[1fr_2fr]`. **Shipped.**
 - A **programmatic API** (`import { lintSource } from "iris-cc"`) — the same engine the CLI uses, exposed for adapter code. **Shipped.**
-- A **Claude Code PreToolUse hook** (`iris-hook`) that intercepts Write/Edit/MultiEdit and blocks off-token classes before they hit disk. The block's `reason` payload carries the suggestion, so the AI rewrites the diff in the same turn. **Shipped.**
+- A **Claude Code PreToolUse hook** (`iris-hook`) that intercepts Write/Edit/MultiEdit and blocks off-token classes before they hit disk. The block's `reason` payload carries the suggestion, so the AI rewrites the diff in the same turn. Backed by a persistent `iris-daemon` for sub-200ms warm calls (see [Performance](#performance)). **Shipped.**
 - An **MCP server** (`iris-mcp`) exposing the engine as four tools — `lint_source`, `list_components`, `apply_fix`, `get_token_map` — so editors that speak MCP (Cursor, Windsurf, Zed, Claude Code) can call them on demand. **Shipped.**
 - A **shadcn awareness layer** that detects installed shadcn/ui components, flags reinvented locals (`function Button() {...}` when `@/components/ui/button` already exists), and exposes the component list to the AI via MCP. **Shipped in v0.3.0.**
 - An **`iris.config.ts`** at the project root with per-rule severity overrides (`off` / `warn` / `error`) and user-customizable allowlist patterns. Same file picked up by the CLI, hook, and MCP server. **Shipped in v0.4.**
@@ -42,10 +42,11 @@ app/components/Hero.tsx
 | v0.2.1 | Public `lintSource` contract, `iris-hook` (PreToolUse), `iris-mcp` (`lint_source` tool) | shipped to `main` |
 | v0.2.2 | OKLab near-match suggestions, `--fix` git-state safety | shipped to `main` |
 | v0.3.0 | shadcn awareness — `parseShadcn`, `iris/no-reinventing-shadcn` rule, `list_components` MCP tool | tagged on `main` |
-| v0.4 α | `iris.config.ts` loader — per-rule severity overrides + user-customizable allowlist | shipped to `main` |
-| v0.4 β | `apply_fix` MCP tool — server-side rewrite of exact + near suggestions | shipped to `main` |
-| v0.4 γ | `get_token_map` MCP tool — proactive token discovery | shipped to `main` |
-| v0.4 δ/ε | Docs + first npm release | in progress |
+| v0.4.0 | `iris.config.ts` + `apply_fix` + `get_token_map` MCP tools | published to npm |
+| v0.5 α | `iris-daemon` — persistent process holding warm caches over loopback HTTP | shipped to `main` |
+| v0.5 β | chokidar watchers for live theme/config invalidation | shipped to `main` |
+| v0.5 γ | `iris-daemon status` / `stop` lifecycle commands + `IRIS_NO_DAEMON` opt-out | shipped to `main` |
+| v0.5 δ/ε | Docs + npm publish | in progress |
 
 A Playwright + Vision visual QA loop and an edit-watching taste profile were considered and deferred. See [CLAUDE.md](CLAUDE.md) for the full spec.
 
@@ -99,7 +100,7 @@ iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before 
 pnpm add -D iris-cc
 ```
 
-The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`) match the project name unchanged. Until v0.4.0 publishes you can install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.
+The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`, `iris-daemon`) match the project name unchanged. `iris-cc@0.4.0` is the latest published; until v0.5 cuts you can install the in-progress version via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.
 
 Project-local config — `.claude/settings.json`:
 
@@ -198,9 +199,36 @@ Severity is `warning` end-to-end. The lint CLI surfaces shadcn warnings; the Cla
 
 **Opt-out.** v0.4 added a config-driven knob: drop `rules: { "iris/no-reinventing-shadcn": "off" }` into `iris.config.ts` (see [Configuration](#configuration)) and the rule disappears end-to-end. Detection itself still runs (used by `list_components` regardless), but the lint pass stays silent. Programmatic callers using `lintSource` directly can also opt out by omitting the fourth argument.
 
+## Performance
+
+The Claude Code hook fires on every Write/Edit/MultiEdit. Each fire used to spawn a fresh `iris-hook` process, parse `tailwind.config.ts`, walk for shadcn components, load `iris.config.ts`, and run lint — measured at 450–570ms cold. CLAUDE.md set a <200ms budget. v0.5 hits it.
+
+**`iris-daemon`.** A long-running per-project process spawned on the first hook call, killed by an idle-out 10 minutes after the last call. Holds warm theme + shadcn + config caches across calls. Listens on a random loopback port; auth is a 32-byte token written to a mode-0o600 lock file at `<projectRoot>/.iris/daemon.json` (gitignore it). Subsequent hook calls read the lock, POST to `http://127.0.0.1:<port>/lint`, and exit — well under the budget for a typed character.
+
+**File watchers.** chokidar watches the project root. Edits to `tailwind.config.{ts,js,mjs,cjs}`, any `.css` file in the tree, or `package.json` (where `detectVersion` reads the tailwind major) clear the theme cache. Edits to `iris.config.{ts,mjs,js}` clear the config cache. The next hook call sees fresh state without a daemon restart.
+
+**Lifecycle commands** (run with `--project-root <path>` to target a specific root, defaults to cwd):
+
+```bash
+iris-daemon status   # is a daemon running here? what's its pid/port/uptime?
+iris-daemon stop     # SIGTERM the daemon and clear its lock
+```
+
+A wedged daemon is rare — the next hook call detects a stale lock and respawns automatically. `stop` is for explicit cleanup (e.g. after `pnpm add iris-cc@<newer>` so the next hook spawns the new binary).
+
+**Fallback.** Anything goes wrong on the daemon path — spawn fails, port unreachable, version mismatch, malformed response — the hook falls back to in-process lint. iris never blocks Claude Code on a daemon hiccup.
+
+**Opt-out.** Set `IRIS_NO_DAEMON=1` in the hook's env to skip the daemon entirely and run every hook call in-process. Useful for sandboxed environments without process-spawn permission, or for an apples-to-apples baseline when filing an issue.
+
+**Monorepos.** The hook walks up from the edited file looking for the first ancestor `tailwind.config.*` and uses that directory as the daemon's project root — covers Turborepo / Nx setups with a shared root config. `iris-daemon status` and `stop` default to the *current working directory*, so running them at the repo root may report "not running" while the hook is using a package-level Tailwind root. Pass `--project-root <path>` to target a specific root.
+
+**Known limitations:**
+- v4 CSS-first projects without a JS config won't trigger the daemon (the hook fast-fails when no ancestor `tailwind.config.*` is found from the edited file). Drop a stub `export default {}` to opt in.
+- `clearCache()` clears the entire theme cache, not per-root. Two daemons running for different projects on the same machine will evict each other's caches when either project's theme changes — a perf cost, not a correctness issue.
+
 ## Install
 
-Not on npm yet — v0.4 is rolling on `main` (α/β/γ landed; δ/ε pending). The first publish lands when v0.4 ε cuts.
+Not on npm yet for v0.5 — `iris-cc@0.4.0` is the latest published. v0.5 lands when ε cuts.
 
 In the meantime, for hands-on use:
 
@@ -214,7 +242,7 @@ That makes `iris`, `iris lint`, and `iris-hook` available in the linked project,
 
 ## Contributing
 
-Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside the v0.4.0 npm publish.
+Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside the v0.5.0 npm publish.
 
 ## License
 

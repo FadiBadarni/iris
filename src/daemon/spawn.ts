@@ -85,7 +85,19 @@ export async function isHealthy(lock: DaemonLock, expectedVersion?: string): Pro
     const res = await fetch(`http://127.0.0.1:${lock.port}/health`, {
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
-    return res.status === 200;
+    if (res.status !== 200) return false;
+    // Identity check: a foreign listener on the recorded port could
+    // also return 200, but won't return our pid + version. Codex flagged
+    // this on the v0.5 γ review — without the body match, status/stop
+    // could lie or kill an unrelated process whose PID was reused.
+    const body = (await res.json().catch(() => null)) as {
+      pid?: unknown;
+      version?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") return false;
+    if (body.pid !== lock.pid) return false;
+    if (typeof body.version !== "string" || body.version !== lock.version) return false;
+    return true;
   } catch {
     return false;
   }

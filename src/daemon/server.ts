@@ -26,6 +26,12 @@ export type CreateDaemonOpts = {
   token: string;
   version: string;
   startedAt: Date;
+  /**
+   * Optional override for `/health.pid` — defaults to `process.pid`. Tests
+   * pass a fixed value to assert pid-mismatch detection without spawning
+   * an out-of-process daemon.
+   */
+  pid?: number;
 };
 
 export function createIrisDaemon(opts: CreateDaemonOpts): Server {
@@ -51,6 +57,12 @@ async function handleRequest(
       status: "ok",
       version: opts.version,
       uptimeMs: Date.now() - opts.startedAt.getTime(),
+      // Identity check for status/stop callers: the lock file records the
+      // pid that wrote it, and a foreign process listening on the recorded
+      // port (or a daemon whose pid was reused after crash) would never
+      // have this exact pid. Lets clients prove they're talking to the
+      // daemon they expect before SIGTERM'ing or trusting the response.
+      pid: opts.pid ?? process.pid,
     });
   }
 
