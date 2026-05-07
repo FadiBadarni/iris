@@ -65,6 +65,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@typescript-eslint/parser": "^8.0.0",
     "cac": "^6.7.14",
+    "culori": "^4.0.2",
     "eslint": "^8.57.0",
     "eslint-plugin-tailwindcss": "^3.18.0",
     "fast-glob": "^3.3.3",
