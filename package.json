@@ -47,6 +47,7 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node scripts/test-e2e.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src test",
     "format": "biome format --write src test",
