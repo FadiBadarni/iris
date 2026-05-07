@@ -1,6 +1,6 @@
 # iris
 
-> **Status: v0.3 α/β/γ are on `main` — lint engine, Claude Code hook, MCP server (`lint_source` + `list_components`), and shadcn awareness all ship. npm publish lands with v0.3 ε (release prep). Use locally via `pnpm link` or a git install in the meantime.**
+> **Status: v0.3.0 is cut and tagged on `main` — lint engine, Claude Code hook, MCP server (`lint_source` + `list_components`), and shadcn awareness all ship. The npm publish is the only remaining step; until then, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
 
@@ -14,7 +14,7 @@ iris reads your Tailwind config or `globals.css @theme` block, learns your proje
 - A **programmatic API** (`import { lintSource } from "iris-cc"`) — the same engine the CLI uses, exposed for adapter code. **Shipped.**
 - A **Claude Code PreToolUse hook** (`iris-hook`) that intercepts Write/Edit/MultiEdit and blocks off-token classes before they hit disk. The block's `reason` payload carries the suggestion, so the AI rewrites the diff in the same turn. **Shipped.**
 - An **MCP server** (`iris-mcp`) exposing the engine as `lint_source` and `list_components` tools, so editors that speak MCP (Cursor, Windsurf, Zed, Claude Code) can call them on demand. **Shipped.**
-- A **shadcn awareness layer** that detects installed shadcn/ui components, flags reinvented locals (`function Button() {...}` when `@/components/ui/button` already exists), and exposes the component list to the AI via MCP. **Shipped (v0.3 α/β/γ on `main`; δ/ε docs + release prep next).**
+- A **shadcn awareness layer** that detects installed shadcn/ui components, flags reinvented locals (`function Button() {...}` when `@/components/ui/button` already exists), and exposes the component list to the AI via MCP. **Shipped in v0.3.0.**
 
 Output of `npx iris lint app/components/Hero.tsx`:
 
@@ -40,10 +40,8 @@ app/components/Hero.tsx
 | v0.1 | `npx iris lint` CLI — Tailwind v3 + v4 parsing, allowlist, semantic rewriting, `--fix` | shipped to `main` |
 | v0.2.1 | Public `lintSource` contract, `iris-hook` (PreToolUse), `iris-mcp` (`lint_source` tool) | shipped to `main` |
 | v0.2.2 | OKLab near-match suggestions, `--fix` git-state safety | shipped to `main` |
-| v0.3 α | `parseShadcn` — detect installed components from `components.json` + glob | shipped to `main` |
-| v0.3 β | `iris/no-reinventing-shadcn` lint rule wired through CLI / hook / MCP | shipped to `main` |
-| v0.3 γ | `list_components` MCP tool for proactive AI queries | shipped to `main` |
-| v0.3 δ/ε | Docs, version bump, npm publish | in progress |
+| v0.3.0 | shadcn awareness — `parseShadcn`, `iris/no-reinventing-shadcn` rule, `list_components` MCP tool | tagged on `main` |
+| v0.3.0 publish | First npm release | next |
 
 A Playwright + Vision visual QA loop and an edit-watching taste profile were considered and deferred. See [CLAUDE.md](CLAUDE.md) for the full spec.
 
@@ -166,7 +164,7 @@ Severity is `warning` end-to-end. The lint CLI surfaces shadcn warnings; the Cla
 
 ## Install
 
-Not on npm yet. The first publish lands with v0.3 ε (release prep) once docs settle and the contract has been smoke-tested in a real Claude Code session.
+Not on npm yet — v0.3.0 is cut and tagged locally; the first publish lands once the contract has been smoke-tested in a real Claude Code session.
 
 In the meantime, for hands-on use:
 
