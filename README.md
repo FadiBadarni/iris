@@ -45,6 +45,34 @@ Existing tools each cover part of the problem.
 
 iris is opinionated: Tailwind, Next.js, shadcn-friendly, MCP-first. If you don't fit that, this isn't your tool.
 
+## Programmatic API
+
+The lint engine is a stable contract that adapters consume. The Claude Code pre-write hook and the MCP server (both shipping in v0.2.1) are thin transports over the same surface — anyone building custom tooling can call it directly.
+
+```ts
+import { lintSource, parseTheme, type IrisLintMessage } from "iris";
+
+const theme = await parseTheme({ cwd: process.cwd() });
+const messages: IrisLintMessage[] = await lintSource(
+  '<div className="bg-[#fa8072]" />',
+  "Hero.tsx",
+  theme,
+);
+
+// messages[0] —
+//   ruleId:    "tailwindcss/no-arbitrary-value"
+//   classname: "bg-[#fa8072]"
+//   suggestion: { kind: "exact", tokenName: "colors.brand.salmon", replacement: "bg-brand-salmon" }
+```
+
+The engine is also reachable via the `iris/lint` subpath for adapter code that doesn't need `parseTheme` or the CLI surface:
+
+```ts
+import { lintSource, type IrisLintMessage } from "iris/lint";
+```
+
+`IrisLintMessage` carries `line`, `column`, `severity`, `classname`, and a discriminated `suggestion` union (`exact | near | ambiguous | none`). Full shape lives in [`src/lint/types.ts`](src/lint/types.ts).
+
 ## Install
 
 Not yet. v0.1 will be `npx iris lint`, published to npm when the parser passes its first real-codebase test. Watch the repo to get a notification.
