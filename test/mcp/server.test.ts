@@ -200,3 +200,111 @@ describe("iris MCP server", () => {
     }
   });
 });
+
+describe("iris MCP server — list_components (slice γ)", () => {
+  test("registers list_components in the tool list", async () => {
+    const { client, cleanup } = await pairedClient(fakeTheme([]), async () => ({
+      components: new Map(),
+      warnings: [],
+    }));
+    try {
+      const result = await client.listTools();
+      const tool = result.tools.find((t) => t.name === "list_components");
+      expect(tool).toBeDefined();
+      expect(tool?.description).toBeTruthy();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns shadcn components as both content and structuredContent", async () => {
+    const shadcn: ShadcnState = {
+      components: new Map([
+        [
+          "Button",
+          {
+            name: "Button",
+            filePath: "/x/components/ui/button.tsx",
+            importPath: "@/components/ui/button",
+          },
+        ],
+        [
+          "Card",
+          {
+            name: "Card",
+            filePath: "/x/components/ui/card.tsx",
+            importPath: "@/components/ui/card",
+          },
+        ],
+      ]),
+      warnings: [],
+    };
+    const { client, cleanup } = await pairedClient(fakeTheme([]), async () => shadcn);
+    try {
+      const result = await client.callTool({ name: "list_components", arguments: {} });
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      const parsed = JSON.parse(text as string) as {
+        components: Array<{ name: string; importPath: string }>;
+      };
+      expect(parsed.components).toHaveLength(2);
+      const names = parsed.components.map((c) => c.name).sort();
+      expect(names).toEqual(["Button", "Card"]);
+      const sc = (
+        result as {
+          structuredContent?: { components: Array<{ name: string }> };
+        }
+      ).structuredContent;
+      expect(sc?.components.map((c) => c.name).sort()).toEqual(["Button", "Card"]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns empty components array (not an error) on no-shadcn projects", async () => {
+    // Querying a non-shadcn project should report "no components" rather
+    // than fail. AI can fall through to default JSX generation.
+    const { client, cleanup } = await pairedClient(fakeTheme([]), async () => ({
+      components: new Map(),
+      warnings: [{ kind: "no-shadcn" as const, message: "no shadcn at /x" }],
+    }));
+    try {
+      const result = await client.callTool({ name: "list_components", arguments: {} });
+      expect(result.isError).toBeFalsy();
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      const parsed = JSON.parse(text as string) as { components: unknown[] };
+      expect(parsed.components).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns empty array when no resolveShadcn is mounted", async () => {
+    // The resolver is optional. Without it, list_components shouldn't fail —
+    // it should return [] so a server configured without shadcn awareness
+    // still answers the call cleanly.
+    const { client, cleanup } = await pairedClient(fakeTheme([]));
+    try {
+      const result = await client.callTool({ name: "list_components", arguments: {} });
+      expect(result.isError).toBeFalsy();
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      const parsed = JSON.parse(text as string) as { components: unknown[] };
+      expect(parsed.components).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("surfaces resolveShadcn errors with isError=true", async () => {
+    const { client, cleanup } = await pairedClient(fakeTheme([]), async () => {
+      throw new Error("shadcn detector exploded");
+    });
+    try {
+      const result = await client.callTool({ name: "list_components", arguments: {} });
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      expect(text).toContain("shadcn detector exploded");
+    } finally {
+      await cleanup();
+    }
+  });
+});

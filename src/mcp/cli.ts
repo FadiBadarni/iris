@@ -35,6 +35,9 @@ async function main(): Promise<void> {
       // parseShadcn does its own filesystem walk on every call — cheap
       // enough that not bothering with mtime invalidation, but expensive
       // enough that a daemon-level cache by root pays off across calls.
+      // The same resolver answers both lint_source (filename present) and
+      // list_components (filename absent — falls back to projectRoot or
+      // startupCwd via resolveProjectRoot).
       const shadcn = await parseShadcn({ cwd: root });
       shadcnCache.set(key, shadcn);
       return shadcn;
@@ -65,13 +68,17 @@ function cacheKey(root: string): string {
 }
 
 function resolveProjectRoot(
-  filename: string,
+  filename: string | undefined,
   projectRoot: string | undefined,
   startupCwd: string,
 ): string {
   if (projectRoot && projectRoot.length > 0) {
     return resolvePath(projectRoot);
   }
+  // No filename to anchor on — list_components calls reach here with
+  // filename=undefined; fall back to startupCwd so the resolver still
+  // points at a sensible root.
+  if (!filename) return startupCwd;
   const absoluteFilename = isAbsolute(filename) ? filename : resolvePath(startupCwd, filename);
   const found = findProjectRoot(absoluteFilename);
   if (found) return found;

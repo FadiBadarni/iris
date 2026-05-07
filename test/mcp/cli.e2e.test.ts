@@ -63,4 +63,31 @@ describe("iris-mcp stdio CLI (e2e)", () => {
     const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
     expect(text).toMatch(/iris:|tailwind/i);
   });
+
+  test("list_components is registered alongside lint_source", async () => {
+    const result = await client.listTools();
+    const tool = result.tools.find((t) => t.name === "list_components");
+    expect(tool).toBeDefined();
+    expect(tool?.inputSchema).toMatchObject({
+      type: "object",
+      properties: { projectRoot: expect.any(Object) },
+    });
+  });
+
+  test("list_components returns shadcn-basic fixture components when projectRoot is set", async () => {
+    const fixturePath = resolve(here, "..", "fixtures", "shadcn-basic");
+    const result = await client.callTool({
+      name: "list_components",
+      arguments: { projectRoot: fixturePath },
+    });
+    expect(result.isError).toBeFalsy();
+    const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+    const parsed = JSON.parse(text as string) as {
+      components: Array<{ name: string; importPath: string }>;
+    };
+    const names = parsed.components.map((c) => c.name).sort();
+    expect(names).toEqual(["Button", "Card"]);
+    const button = parsed.components.find((c) => c.name === "Button");
+    expect(button?.importPath).toBe("@/components/ui/button");
+  });
 });
