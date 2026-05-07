@@ -17,9 +17,14 @@ export async function parseTheme(options: ParseOptions = {}): Promise<ResolvedTh
     if (cached) return cached;
   }
 
-  const detected = await detectVersion(cwd);
+  // An explicit --entry is a user statement of intent: the project has a v4
+  // CSS entry, even if its filename or path doesn't match the heuristic
+  // candidates and even if a v3 tailwind.config also lives in the tree.
+  // Skip detection in that case and route straight to the v4 adapter.
+  const useV4FromEntry = options.entry !== undefined;
+  const detected = useV4FromEntry ? null : await detectVersion(cwd);
   const theme =
-    detected.version === 3
+    !useV4FromEntry && detected?.version === 3
       ? await parseV3(cwd)
       : await parseV4(cwd, options.entry ? { entry: options.entry } : {});
 

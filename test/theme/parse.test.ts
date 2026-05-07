@@ -97,4 +97,19 @@ describe("parseTheme dispatcher", () => {
       }),
     ).rejects.toThrow(/not found relative to/);
   });
+
+  it("forces the v4 path when --entry is set even with no detection hints", async () => {
+    // The fixture has no tailwindcss in package.json and no app/globals.css
+    // at any standard path, so detectVersion would throw "no tailwind project
+    // detected". An explicit --entry overrides detection and routes straight
+    // to the v4 adapter.
+    const theme = await parseTheme({
+      cwd: fixture("v4-custom-entry-no-hints"),
+      entry: "styles/main.css",
+      noCache: true,
+    });
+    expect(theme.version).toBe(4);
+    expect(theme.tokens.get("colors.brand")?.value).toBe("oklch(0.7 0.15 260)");
+    expect(theme.tokens.get("spacing.gutter")?.value).toBe("1.25rem");
+  });
 });

@@ -1,0 +1,6 @@
+{
+  "name": "fixture-v4-custom-entry-no-hints",
+  "version": "0.0.0",
+  "private": true,
+  "_note": "Intentionally omits tailwindcss from deps so detectVersion has no package signal. Combined with a non-standard CSS path, parseTheme should still route to v4 when --entry is passed."
+}

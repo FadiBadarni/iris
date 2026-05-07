@@ -1,0 +1,4 @@
+@theme {
+  --color-brand: oklch(0.7 0.15 260);
+  --spacing-gutter: 1.25rem;
+}
