@@ -62,4 +62,66 @@ describe("synthesizeV3Config", () => {
     const config = synthesizeV3Config(t);
     expect(config.theme?.extend?.colors).toEqual({ muted: "#f3f4f6" });
   });
+
+  test("on key collision, higher source precedence wins (user > bridge > default)", () => {
+    // Both `colors.brand.salmon` and `colors.brand-salmon` flatten to the
+    // same v3 key `brand-salmon`. The v4-theme entry should win over the
+    // v4-default entry regardless of insertion order.
+    const tokens = new Map<string, TokenEntry>();
+    const a: TokenEntry = {
+      name: "colors.brand.salmon",
+      value: "#default",
+      type: "color",
+      source: "v4-default",
+      file: "default.css",
+    };
+    const b: TokenEntry = {
+      name: "colors.brand-salmon",
+      value: "#user",
+      type: "color",
+      source: "v4-theme",
+      file: "user.css",
+    };
+    // Insert default FIRST so the user-defined would overwrite naturally.
+    tokens.set(a.name, a);
+    tokens.set(b.name, b);
+    const config = synthesizeV3Config({
+      version: 4,
+      tokens,
+      byValue: new Map(),
+      sources: [],
+      warnings: [],
+    });
+    expect(config.theme?.extend?.colors).toEqual({ "brand-salmon": "#user" });
+  });
+
+  test("on key collision, default does not overwrite user-defined", () => {
+    // Inverse insertion order: user-defined FIRST, default SECOND. The user
+    // value must still win.
+    const tokens = new Map<string, TokenEntry>();
+    const user: TokenEntry = {
+      name: "colors.brand-salmon",
+      value: "#user",
+      type: "color",
+      source: "v4-theme",
+      file: "user.css",
+    };
+    const def: TokenEntry = {
+      name: "colors.brand.salmon",
+      value: "#default",
+      type: "color",
+      source: "v4-default",
+      file: "default.css",
+    };
+    tokens.set(user.name, user);
+    tokens.set(def.name, def);
+    const config = synthesizeV3Config({
+      version: 4,
+      tokens,
+      byValue: new Map(),
+      sources: [],
+      warnings: [],
+    });
+    expect(config.theme?.extend?.colors).toEqual({ "brand-salmon": "#user" });
+  });
 });

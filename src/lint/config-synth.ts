@@ -1,4 +1,4 @@
-import type { ResolvedTheme, TokenType } from "../theme/types.js";
+import type { ResolvedTheme, TokenSource, TokenType } from "../theme/types.js";
 
 // Slice C.2 strategy: project iris's ResolvedTheme into a v3-shaped Tailwind
 // config object that eslint-plugin-tailwindcss can hand to its rule engine
@@ -46,6 +46,18 @@ const NAMESPACE_FOR_TYPE: Record<
   screen: "screens",
 };
 
+// Lower rank = higher precedence. Tokens defined in user CSS/JS beat those
+// pulled from the v3 bridge, which beat the Tailwind defaults. Two iris token
+// names that flatten to the same v3 key (`colors.brand.salmon` and
+// `colors.brand-salmon` both → `brand-salmon`) get resolved deterministically
+// by source rather than by Map iteration order.
+const SOURCE_RANK: Record<TokenSource, number> = {
+  "v4-theme": 0,
+  "v3-config": 0,
+  "v4-config-bridge": 1,
+  "v4-default": 2,
+};
+
 const cache = new WeakMap<ResolvedTheme, SyntheticTailwindConfig>();
 
 export function synthesizeV3Config(theme: ResolvedTheme): SyntheticTailwindConfig {
@@ -53,6 +65,10 @@ export function synthesizeV3Config(theme: ResolvedTheme): SyntheticTailwindConfi
   if (cached !== undefined) return cached;
 
   const extend: NonNullable<NonNullable<SyntheticTailwindConfig["theme"]>["extend"]> = {};
+  // Per-(namespace, key) winning rank; tracked so a later default-source
+  // entry can't quietly stomp an earlier user-source one when both flatten
+  // to the same v3 key.
+  const winningRank = new Map<string, number>();
 
   for (const entry of theme.tokens.values()) {
     if (entry.type === "other") continue;
@@ -62,12 +78,17 @@ export function synthesizeV3Config(theme: ResolvedTheme): SyntheticTailwindConfi
     if (!tail) continue;
     const ns = NAMESPACE_FOR_TYPE[entry.type];
     const key = tail.replace(/\./g, "-");
+    const rank = SOURCE_RANK[entry.source];
+    const cellId = `${ns}.${key}`;
+    const incumbent = winningRank.get(cellId);
+    if (incumbent !== undefined && rank > incumbent) continue;
     let bucket = extend[ns];
     if (bucket === undefined) {
       bucket = {};
       extend[ns] = bucket;
     }
     bucket[key] = entry.value;
+    winningRank.set(cellId, rank);
   }
 
   const config: SyntheticTailwindConfig = { theme: { extend } };
