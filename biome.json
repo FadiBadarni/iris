@@ -11,7 +11,8 @@
       "node_modules",
       "coverage",
       ".debate",
-      "test/fixtures/**/*.css"
+      "test/fixtures/**/*.css",
+      "test/fixtures/**/*.tsx"
     ]
   },
   "formatter": {

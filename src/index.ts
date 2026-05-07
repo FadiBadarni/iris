@@ -16,3 +16,11 @@ export type {
   SuggestCandidate,
   SuggestResult,
 } from "./lint/types.js";
+
+export { parseShadcn } from "./shadcn/detect.js";
+export type {
+  ShadcnComponent,
+  ShadcnState,
+  ShadcnWarning,
+  ShadcnWarningKind,
+} from "./shadcn/types.js";
