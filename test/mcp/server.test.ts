@@ -308,3 +308,182 @@ describe("iris MCP server — list_components (slice γ)", () => {
     }
   });
 });
+
+describe("iris MCP server — apply_fix (slice v0.4 β)", () => {
+  test("registers apply_fix in the tool list", async () => {
+    const { client, cleanup } = await pairedClient(fakeTheme([]));
+    try {
+      const result = await client.listTools();
+      const tool = result.tools.find((t) => t.name === "apply_fix");
+      expect(tool).toBeDefined();
+      expect(tool?.description).toBeTruthy();
+      expect(tool?.inputSchema).toMatchObject({
+        type: "object",
+        properties: expect.objectContaining({
+          source: expect.any(Object),
+          filename: expect.any(Object),
+        }),
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("rewrites bg-[#fa8072] when the theme has a matching token", async () => {
+    const theme = fakeTheme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
+    const { client, cleanup } = await pairedClient(theme);
+    try {
+      const result = await client.callTool({
+        name: "apply_fix",
+        arguments: {
+          source: '<div className="bg-[#fa8072]" />',
+          filename: "Hero.tsx",
+        },
+      });
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      const parsed = JSON.parse(text as string) as {
+        source: string;
+        applied: number;
+        remaining: Array<{ ruleId: string }>;
+      };
+      expect(parsed.source).toBe('<div className="bg-brand-salmon" />');
+      expect(parsed.applied).toBe(1);
+      expect(parsed.remaining).toEqual([]);
+      expect(result.isError).toBeFalsy();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns mixed: rewrites the fixable, surfaces the unfixable in remaining", async () => {
+    // Theme has only #fa8072, so #abc has no match (suggestion.kind === "none").
+    // applyFixes should rewrite the first and leave the second alone, with
+    // `remaining` carrying the unmatched violation so the AI sees what's left.
+    const theme = fakeTheme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
+    const { client, cleanup } = await pairedClient(theme);
+    try {
+      const result = await client.callTool({
+        name: "apply_fix",
+        arguments: {
+          source: '<div className="bg-[#fa8072] bg-[#abc]" />',
+          filename: "Hero.tsx",
+        },
+      });
+      const parsed = JSON.parse(
+        (result.content as Array<{ type: string; text: string }>)[0]?.text as string,
+      ) as {
+        source: string;
+        applied: number;
+        remaining: Array<{ classname?: string; column: number }>;
+      };
+      expect(parsed.source).toContain("bg-brand-salmon");
+      expect(parsed.source).toContain("bg-[#abc]");
+      expect(parsed.applied).toBe(1);
+      expect(parsed.remaining).toHaveLength(1);
+      expect(parsed.remaining[0]?.classname).toBe("bg-[#abc]");
+      // codex 5.5 high flagged that pre-fix line/column would be stale in
+      // the rewritten source. Today's tailwindcss rules report against the
+      // className attribute (not the offending class span), so columns
+      // happen not to drift across this fix — but the implementation
+      // re-lints the rewritten source so the contract holds for future
+      // rules that DO report class-span positions.
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("is idempotent — second pass over rewritten source applies 0", async () => {
+    // The natural AI workflow: call apply_fix, get rewritten source, call
+    // apply_fix again to confirm. Second pass should report applied: 0
+    // and return the same source unchanged.
+    const theme = fakeTheme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
+    const { client, cleanup } = await pairedClient(theme);
+    try {
+      const first = await client.callTool({
+        name: "apply_fix",
+        arguments: { source: '<div className="bg-[#fa8072]" />', filename: "Hero.tsx" },
+      });
+      const firstParsed = JSON.parse(
+        (first.content as Array<{ type: string; text: string }>)[0]?.text as string,
+      ) as { source: string; applied: number };
+      expect(firstParsed.applied).toBe(1);
+
+      const second = await client.callTool({
+        name: "apply_fix",
+        arguments: { source: firstParsed.source, filename: "Hero.tsx" },
+      });
+      const secondParsed = JSON.parse(
+        (second.content as Array<{ type: string; text: string }>)[0]?.text as string,
+      ) as { source: string; applied: number; remaining: unknown[] };
+      expect(secondParsed.applied).toBe(0);
+      expect(secondParsed.source).toBe(firstParsed.source);
+      expect(secondParsed.remaining).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("returns the input unchanged with applied: 0 on a clean source", async () => {
+    const { client, cleanup } = await pairedClient(fakeTheme([]));
+    try {
+      const result = await client.callTool({
+        name: "apply_fix",
+        arguments: {
+          source: '<div className="bg-blue-500" />',
+          filename: "Hero.tsx",
+        },
+      });
+      const parsed = JSON.parse(
+        (result.content as Array<{ type: string; text: string }>)[0]?.text as string,
+      ) as { source: string; applied: number; remaining: unknown[] };
+      expect(parsed.source).toBe('<div className="bg-blue-500" />');
+      expect(parsed.applied).toBe(0);
+      expect(parsed.remaining).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("structuredContent mirrors the JSON-encoded text payload", async () => {
+    const theme = fakeTheme([{ name: "colors.brand.salmon", value: "#fa8072", type: "color" }]);
+    const { client, cleanup } = await pairedClient(theme);
+    try {
+      const result = await client.callTool({
+        name: "apply_fix",
+        arguments: {
+          source: '<div className="bg-[#fa8072]" />',
+          filename: "Hero.tsx",
+        },
+      });
+      const sc = (
+        result as {
+          structuredContent?: { source: string; applied: number; remaining: unknown[] };
+        }
+      ).structuredContent;
+      expect(sc?.source).toBe('<div className="bg-brand-salmon" />');
+      expect(sc?.applied).toBe(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("surfaces resolveTheme errors with isError=true", async () => {
+    const { client, cleanup } = await pairedClient(async () => {
+      throw new Error("no tailwind project at this root");
+    });
+    try {
+      const result = await client.callTool({
+        name: "apply_fix",
+        arguments: {
+          source: '<div className="bg-[#fa8072]" />',
+          filename: "Hero.tsx",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text;
+      expect(text).toContain("no tailwind project");
+    } finally {
+      await cleanup();
+    }
+  });
+});

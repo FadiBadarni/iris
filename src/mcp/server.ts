@@ -12,7 +12,9 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { IrisConfig } from "../config/types.js";
+import { applyFixes } from "../lint/fix.js";
 import { lintSource } from "../lint/linter.js";
+import type { IrisLintMessage } from "../lint/types.js";
 import type { ShadcnState } from "../shadcn/types.js";
 import type { ResolvedTheme } from "../theme/types.js";
 
@@ -94,6 +96,32 @@ const LIST_COMPONENTS_INPUT_SCHEMA = {
 const LIST_COMPONENTS_DESCRIPTION =
   "List the shadcn/ui components installed in the project. Each entry is { name, filePath, importPath }. Call this before writing JSX so you can import existing components instead of reinventing them.";
 
+const APPLY_FIX_TOOL_NAME = "apply_fix";
+
+const APPLY_FIX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    source: {
+      type: "string",
+      description: "Raw source code (typically a JSX/TSX file's contents) to lint and rewrite.",
+    },
+    filename: {
+      type: "string",
+      description:
+        "Path used for diagnostics. Absolute paths anchor project-root inference; relative paths are resolved against the server's cwd.",
+    },
+    projectRoot: {
+      type: "string",
+      description:
+        "Override the inferred project root. Pass this in monorepos when the package containing `filename` is not the workspace root that owns the Tailwind config.",
+    },
+  },
+  required: ["source", "filename"],
+} as const;
+
+const APPLY_FIX_DESCRIPTION =
+  "Lint a JSX/TSX source string and apply iris's exact + near match suggestions in place. Returns { source, applied, remaining } where source is the rewritten code, applied is the number of fixes applied, and remaining contains violations the engine had no applicable fix for (ambiguous matches, no token match, or rules without a fixer). For `iris/no-reinventing-shadcn` entries in `remaining`, manually import the referenced component from its canonical path instead of redefining it locally.";
+
 export function createIrisMcpServer(opts: CreateServerOpts): Server {
   const server = new Server({ name: "iris", version: "0.3.0" }, { capabilities: { tools: {} } });
 
@@ -109,6 +137,11 @@ export function createIrisMcpServer(opts: CreateServerOpts): Server {
         description: LIST_COMPONENTS_DESCRIPTION,
         inputSchema: LIST_COMPONENTS_INPUT_SCHEMA,
       },
+      {
+        name: APPLY_FIX_TOOL_NAME,
+        description: APPLY_FIX_DESCRIPTION,
+        inputSchema: APPLY_FIX_INPUT_SCHEMA,
+      },
     ],
   }));
 
@@ -118,6 +151,9 @@ export function createIrisMcpServer(opts: CreateServerOpts): Server {
     }
     if (req.params.name === LIST_COMPONENTS_TOOL_NAME) {
       return handleListComponents(req.params.arguments, opts);
+    }
+    if (req.params.name === APPLY_FIX_TOOL_NAME) {
+      return handleApplyFix(req.params.arguments, opts);
     }
     return errorResult(`Unknown tool: ${req.params.name}`);
   });
@@ -208,6 +244,104 @@ async function handleListComponents(rawArgs: unknown, opts: CreateServerOpts) {
 
   const components = state ? [...state.components.values()] : [];
   const payload = { components };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    structuredContent: payload,
+  };
+}
+
+async function handleApplyFix(rawArgs: unknown, opts: CreateServerOpts) {
+  const args = rawArgs as
+    | { source?: unknown; filename?: unknown; projectRoot?: unknown }
+    | undefined;
+  if (typeof args?.source !== "string" || typeof args?.filename !== "string") {
+    return errorResult(
+      "apply_fix requires { source: string, filename: string, projectRoot?: string }",
+    );
+  }
+  const projectRoot = typeof args.projectRoot === "string" ? args.projectRoot : undefined;
+
+  // Same theme/shadcn/config resolution as handleLintSource. apply_fix is
+  // lint_source plus a server-side rewrite, so we mirror the same posture
+  // (theme errors abort; shadcn/config errors swallow + fall back).
+  let theme: ResolvedTheme;
+  try {
+    theme = await opts.resolveTheme(args.filename, projectRoot);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return errorResult(`iris: ${msg}`);
+  }
+
+  let shadcn: ShadcnState | undefined;
+  if (opts.resolveShadcn) {
+    try {
+      shadcn = await opts.resolveShadcn(args.filename, projectRoot);
+    } catch {
+      shadcn = undefined;
+    }
+  }
+
+  let config: IrisConfig | undefined;
+  if (opts.resolveConfig) {
+    try {
+      config = await opts.resolveConfig(args.filename, projectRoot);
+    } catch {
+      config = undefined;
+    }
+  }
+
+  let messages: IrisLintMessage[];
+  try {
+    messages = await lintSource(args.source, args.filename, theme, shadcn, config);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return errorResult(`iris: lintSource failed for ${args.filename}: ${msg}`);
+  }
+
+  // A message is "fixable" iff its suggestion has a concrete replacement.
+  // `ambiguous` (multiple candidates), `none` (no token match), and rule
+  // violations without a `suggestion` field at all (the v0.3 shadcn rule
+  // today, plus future rules) get no fix applied.
+  const fixable = messages.filter(
+    (m) => m.suggestion?.kind === "exact" || m.suggestion?.kind === "near",
+  );
+
+  let rewritten: string;
+  try {
+    rewritten = applyFixes(args.source, fixable);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return errorResult(`iris: applyFixes failed for ${args.filename}: ${msg}`);
+  }
+
+  // Re-lint the rewritten source so `remaining` carries accurate post-fix
+  // line/column positions and `applied` reflects what actually patched.
+  // Codex 5.5 high flagged two real bugs in the naive "applied = fixable
+  // length" + "remaining = pre-fix unfixables" approach: the count
+  // over-reported when findClassSpan silently dropped a patch, and the
+  // pre-fix columns drifted in the rewritten source. Re-linting handles
+  // both — successful applies disappear from the second pass; skipped
+  // fixables still surface there.
+  let remaining: IrisLintMessage[];
+  let applied: number;
+  try {
+    const after = await lintSource(rewritten, args.filename, theme, shadcn, config);
+    remaining = after;
+    const stillFixable = after.filter(
+      (m) => m.suggestion?.kind === "exact" || m.suggestion?.kind === "near",
+    ).length;
+    applied = fixable.length - stillFixable;
+  } catch {
+    // Second-pass lint failed (shouldn't happen with the current class-
+    // replace fixer, but defensive in case a future fixer produces
+    // syntactically odd output). Fall back to the pre-fix view.
+    remaining = messages.filter(
+      (m) => m.suggestion?.kind !== "exact" && m.suggestion?.kind !== "near",
+    );
+    applied = fixable.length;
+  }
+
+  const payload = { source: rewritten, applied, remaining };
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload,
