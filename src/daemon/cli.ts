@@ -18,8 +18,10 @@ import type { IrisConfig } from "../config/types.js";
 import { parseTheme, version } from "../index.js";
 import { parseShadcn } from "../shadcn/detect.js";
 import type { ShadcnState } from "../shadcn/types.js";
+import { clearCache as clearThemeCache } from "../theme/cache.js";
 import { type DaemonLock, clearLock, writeLock } from "./lock.js";
 import { createIrisDaemon } from "./server.js";
+import { createDaemonWatchers } from "./watchers.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -90,6 +92,18 @@ async function main(): Promise<void> {
   };
   await writeLock(projectRoot, lock);
 
+  // File watchers (slice β). Without these the daemon would hold stale
+  // theme/config state until restart whenever the user edited their
+  // tailwind config or iris.config. parseTheme has its own mtime cache
+  // (cleared via clearThemeCache); parseShadcn has no cache so we don't
+  // need a shadcn-watcher branch.
+  const watchers = createDaemonWatchers(projectRoot, {
+    onThemeChange: () => clearThemeCache(),
+    onConfigChange: () => {
+      configCache.delete(projectRoot);
+    },
+  });
+
   let idleTimer: NodeJS.Timeout | undefined;
   function resetIdle(): void {
     if (idleTimer) clearTimeout(idleTimer);
@@ -108,6 +122,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     process.stderr.write(`iris-daemon: ${reason}\n`);
     if (idleTimer) clearTimeout(idleTimer);
+    await watchers.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     // Some Node versions expose closeIdleConnections to flush keep-alive
     // sockets that close() alone won't drop until they idle out. Optional
