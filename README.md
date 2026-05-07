@@ -73,6 +73,35 @@ import { lintSource, type IrisLintMessage } from "iris/lint";
 
 `IrisLintMessage` carries `line`, `column`, `severity`, `classname`, and a discriminated `suggestion` union (`exact | near | ambiguous | none`). Full shape lives in [`src/lint/types.ts`](src/lint/types.ts).
 
+## Claude Code integration
+
+iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before they land. Install iris in the workspace and drop the hook into `.claude/settings.json`:
+
+```bash
+pnpm add -D iris
+```
+
+Project-local config — `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "npx iris-hook" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+When Claude generates a `<div className="bg-[#fa8072]" />`, the hook blocks the write and returns the iris suggestion (`bg-brand-salmon`) as the block reason. The AI applies the suggested token and the write goes through on the next turn.
+
+The example skill at [`examples/claude-code/iris.skill.md`](examples/claude-code/iris.skill.md) nudges the AI toward token use *before* the hook fires; the hook is the hard gate when guidance fails. Both files are copy-paste ready.
+
 ## Install
 
 Not yet. v0.1 will be `npx iris lint`, published to npm when the parser passes its first real-codebase test. Watch the repo to get a notification.

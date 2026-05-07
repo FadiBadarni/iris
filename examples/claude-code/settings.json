@@ -1,0 +1,16 @@
+{
+  "_comment": "Drop this into .claude/settings.json (project) or ~/.claude/settings.json (global). Requires `iris` installed in the workspace (`pnpm add -D iris`) so npx can resolve iris-hook from node_modules.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx iris-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
