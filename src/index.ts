@@ -8,3 +8,11 @@ export type {
   TokenSource,
   TokenType,
 } from "./theme/types.js";
+
+export { lintSource } from "./lint/linter.js";
+export type {
+  IrisLintMessage,
+  IrisLintSeverity,
+  SuggestCandidate,
+  SuggestResult,
+} from "./lint/types.js";

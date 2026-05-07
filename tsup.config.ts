@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     cli: "src/cli.ts",
+    "lint/index": "src/lint/index.ts",
   },
   format: ["esm"],
   target: "node18",
