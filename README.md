@@ -1,6 +1,6 @@
 # iris
 
-> **Status: v0.4.0 is on npm (`iris-cc`); v0.5 is in progress — persistent `iris-daemon` for sub-200ms hook latency has landed on `main`. The v0.5 publish lands once ε cuts; until then, install via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.**
+> **Status: v0.5.0 is on npm (`iris-cc`). Five surfaces ship: `npx iris lint` CLI, programmatic `lintSource` API, `iris-hook` (Claude Code PreToolUse with persistent `iris-daemon` for sub-200ms warm calls), `iris-mcp` (four MCP tools), and an `iris.config.ts` for user customization.**
 
 Claude Code writes `bg-[#f3f4f6]` when your theme defines `bg-muted`. It picks `p-[13px]` instead of the spacing scale you spent two days defining. It generates a fresh `<Button>` even though `shadcn add button` is already in your tree. You catch some of this in PR review. Most of it ships.
 
@@ -43,10 +43,7 @@ app/components/Hero.tsx
 | v0.2.2 | OKLab near-match suggestions, `--fix` git-state safety | shipped to `main` |
 | v0.3.0 | shadcn awareness — `parseShadcn`, `iris/no-reinventing-shadcn` rule, `list_components` MCP tool | tagged on `main` |
 | v0.4.0 | `iris.config.ts` + `apply_fix` + `get_token_map` MCP tools | published to npm |
-| v0.5 α | `iris-daemon` — persistent process holding warm caches over loopback HTTP | shipped to `main` |
-| v0.5 β | chokidar watchers for live theme/config invalidation | shipped to `main` |
-| v0.5 γ | `iris-daemon status` / `stop` lifecycle commands + `IRIS_NO_DAEMON` opt-out | shipped to `main` |
-| v0.5 δ/ε | Docs + npm publish | in progress |
+| v0.5.0 | `iris-daemon` for sub-200ms hook latency + chokidar watchers + lifecycle commands + `IRIS_NO_DAEMON` opt-out | published to npm |
 
 A Playwright + Vision visual QA loop and an edit-watching taste profile were considered and deferred. See [CLAUDE.md](CLAUDE.md) for the full spec.
 
@@ -100,7 +97,7 @@ iris ships a PreToolUse hook (`iris-hook`) that catches off-token writes before 
 pnpm add -D iris-cc
 ```
 
-The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`, `iris-daemon`) match the project name unchanged. `iris-cc@0.4.0` is the latest published; until v0.5 cuts you can install the in-progress version via `pnpm link` from a local clone or `pnpm add -D github:FadiBadarni/iris`.
+The npm package is `iris-cc` (the bare `iris` name was already taken on the registry; `cc` evokes the Claude Code editor it's designed around). The bin names (`iris`, `iris-hook`, `iris-mcp`, `iris-daemon`) match the project name unchanged.
 
 Project-local config — `.claude/settings.json`:
 
@@ -224,25 +221,26 @@ A wedged daemon is rare — the next hook call detects a stale lock and respawns
 
 **Known limitations:**
 - v4 CSS-first projects without a JS config won't trigger the daemon (the hook fast-fails when no ancestor `tailwind.config.*` is found from the edited file). Drop a stub `export default {}` to opt in.
-- `clearCache()` clears the entire theme cache, not per-root. Two daemons running for different projects on the same machine will evict each other's caches when either project's theme changes — a perf cost, not a correctness issue.
+- A `tailwind.config.ts` whose cold parse takes longer than 5s will trip the daemon's `/lint` timeout, causing the hook to fall back to in-process for that one call (the next call hits the warm daemon and is fast). Bump the timeout in source if it fires repeatedly.
+- A failed non-default `@config "./tailwind.legacy.ts"` bridge isn't watched (the watcher only invalidates on `tailwind.config.*` and `.css`). Run `iris-daemon stop` after creating the bridge target to pick up the fix.
 
 ## Install
 
-Not on npm yet for v0.5 — `iris-cc@0.4.0` is the latest published. v0.5 lands when ε cuts.
+```bash
+pnpm add -D iris-cc      # or npm install --save-dev iris-cc / yarn add -D iris-cc
+```
 
-In the meantime, for hands-on use:
+That makes `iris`, `iris lint`, `iris-hook`, `iris-mcp`, and `iris-daemon` available via `npx` and from `.claude/settings.json`. For hacking on iris itself:
 
 ```bash
 git clone https://github.com/FadiBadarni/iris.git
 cd iris && pnpm install && pnpm build
-pnpm link --global   # then `pnpm link --global iris-cc` from your project
+pnpm link --global       # then `pnpm link --global iris-cc` from your project
 ```
-
-That makes `iris`, `iris lint`, and `iris-hook` available in the linked project, including from `.claude/settings.json`.
 
 ## Contributing
 
-Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` will land alongside the v0.5.0 npm publish.
+Solo work for now. Commit conventions live in [COMMITS.md](COMMITS.md). A `CONTRIBUTING.md` is on the list for the next release.
 
 ## License
 

@@ -2,6 +2,48 @@
 
 All notable changes to iris are documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-05-07
+
+Production performance. The Claude Code hook now runs against a long-running per-project `iris-daemon` that holds warm theme + config caches across calls (shadcn detection runs fresh each call — cheap, no in-memory state to keep). The first daemon use for a project pays the hook startup + daemon spawn + first parse cost; every subsequent healthy-daemon call is a loopback HTTP POST, well under the <200ms CLAUDE.md budget that previous versions blew through at 450–570ms each call. Minor bump because the public surface grows: a new `iris-daemon` bin, the daemon's HTTP `/lint` and `/health` endpoints, and a new `IRIS_NO_DAEMON` env-var contract. The existing `iris-hook`, `iris-mcp`, and `iris` bins keep their behavior; programmatic API is unchanged.
+
+### Added
+
+- **`iris-daemon` binary.** Spawned by the hook on first call (per project root); holds warm caches; idles out after 10 minutes. Loopback HTTP only (`127.0.0.1:<random-port>`), authenticated via a 32-byte hex token written to `<projectRoot>/.iris/daemon.json` with mode 0o600. Two endpoints: `POST /lint` (the same engine as the in-process path; returns `{ violations: IrisLintMessage[] }`) and `GET /health` (`{ status, version, uptimeMs, pid }` — no auth).
+- **`iris-daemon status` / `stop` subcommands.** Operator surface for triage. `status` prints pid/port/uptime/version; `stop` SIGTERMs the daemon, waits for exit, and clears the lock — ownership-checked so we don't kill an unrelated process whose PID was reused. Both default to cwd; pass `--project-root <path>` for monorepos.
+- **chokidar file watchers inside the daemon.** Edits to `tailwind.config.{ts,js,mjs,cjs}`, any `.css` file in the project tree, or `package.json` (where `detectVersion` reads the tailwind major) clear the theme cache. Edits to `iris.config.{ts,mjs,js}` clear the config cache. Live invalidation across calls without restart.
+- **`IRIS_NO_DAEMON` env var.** Set to anything except `""`/`"0"`/`"false"`/`"no"`/`"off"` (case-insensitive) to skip the daemon entirely and force the in-process path. Useful for sandboxed environments without process-spawn permission, debugging, or filing an issue with a clean baseline. Silent — no "daemon path failed" stderr noise on opt-out.
+- **Hook fast-fail for non-tailwind projects.** Walks ancestors from the edited file looking for `tailwind.config.*`; exits silently with no daemon spawn when none is found. Previously the daemon would have started, returned 500 on `/lint`, and the hook would have fallen back to the in-process path — wasted work.
+- **Performance README section.** Documents the daemon model, watchers, lifecycle commands, fallback behavior, opt-out, and known limitations.
+
+### Changed
+
+- **Hook latency profile.** Cold first call still pays Node startup + parseTheme; every warm call after is a loopback POST. The headline budget was <200ms warm; this hits it.
+- **Hook integration.** `iris-hook` now tries the daemon path first, falls back to in-process resolution on any failure (spawn failure, port unreachable, version mismatch, malformed response). The fallback writes a one-line stderr diagnostic visible in `claude --debug`.
+- **Embedded MCP server identity.** `Server({ name: "iris", version: "0.4.0" })` → `"0.5.0"`.
+- **Daemon `/health` includes `pid`.** Identity check for `status` / `stop`: a foreign loopback listener could return 200 on the recorded port, but won't return our pid + version. Lets clients prove they're talking to the daemon they expect.
+- **Lock-file shape.** `<projectRoot>/.iris/daemon.json` records `{ pid, port, token, version, startedAt }`. Mode 0o600 (same trust boundary as a project-local `.npmrc`). `.iris/` is gitignored and biome-ignored.
+
+### Risks
+
+- **v4 CSS-first projects without a JS config don't trigger the daemon.** `hasTailwindSignal` requires an ancestor `tailwind.config.*`. Drop a stub `export default {}` to opt in. Documented in README.
+- **Slow cold parses can exceed the 5s `/lint` timeout.** Projects whose `tailwind.config.ts` evaluation takes >5s on a cold daemon (heavy plugin chains, slow filesystem, antivirus scanning) will see the hook log a fallback diagnostic and re-parse in-process. Subsequent calls hit the warm daemon and are fast. Bump the timeout if the fallback fires repeatedly.
+- **Failed non-default `@config "./tailwind.legacy.ts"` recovery.** If the bridge target was missing initially and the user later creates it, the watcher won't pick up the .ts file (basename filter only covers `tailwind.config.*` and `.css`). Run `iris-daemon stop` to pick up the fix.
+
+### Dependencies
+
+- `chokidar@^5.0.0` (new runtime dep). 30 KB. Used by the daemon's file watchers.
+
+### Deferred to v0.6+
+
+- `add_component` MCP tool (shells `npx shadcn add`)
+- Structural similarity matching for the shadcn rule
+- Detection of non-shadcn libraries (Radix, Headless UI)
+- The shadcn-aware `--fix` rewriter
+- Visual QA Phase 2 (Playwright + axe-core)
+- Adoption telemetry
+- Cross-project shared daemon (single process serving multiple roots)
+- Per-root theme cache invalidation (avoid the cross-daemon eviction risk above)
+
 ## [0.4.0] — 2026-05-07
 
 Production-ready: configurability + proactive AI surface. iris now reads an optional `iris.config.ts` for per-rule severity overrides and user-customizable allowlist patterns, and the MCP server gains two new tools (`apply_fix`, `get_token_map`) so the AI can self-correct in one round-trip rather than read+lint+write across three tool calls. Minor bump (not patch) because the public surface grows: new `loadConfig` / `defineConfig` exports, new `IrisConfig` / `IrisRuleSeverity` types, a fifth optional argument on `lintSource`, and two new MCP tools. The existing `lintSource(source, filename, theme?, shadcn?)` signature stays valid — v0.3 users get no surprises if they don't opt in.
