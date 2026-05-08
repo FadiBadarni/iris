@@ -1,0 +1,12 @@
+# Enforce LF line endings everywhere. biome.json's `lineEnding: "lf"` is
+# the project rule; without this file, GitHub-hosted Windows runners (and
+# local Windows clones) hit `core.autocrlf=true` defaults and check out
+# files as CRLF — biome then refuses to format them and CI fails on the
+# Windows matrix cells.
+* text=auto eol=lf
+
+# Lockfiles + binaries: don't normalize.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary

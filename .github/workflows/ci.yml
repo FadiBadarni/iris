@@ -60,17 +60,20 @@ jobs:
         # lockfile drift between local and CI.
         run: pnpm install --frozen-lockfile
 
+      - name: Build
+        # tsup emits dist/{cli,hook/cli,mcp/cli,daemon/cli,index,lint/index}.js
+        # plus type declarations. Build runs BEFORE `pnpm check` because
+        # several integration tests under test/{hook,mcp,daemon}/*.e2e.test.ts
+        # spawn the built `dist/*/cli.js` binaries — without an existing
+        # dist they'd fail with `Cannot find module`. Locally we always
+        # have a stale dist; on a fresh CI runner the first build is here.
+        run: pnpm build
+
       - name: Check (typecheck + biome + unit + integration tests)
         # `pnpm check` is the project's `typecheck && lint && test`
         # composite; it includes the 330+ vitest run. Single source of
         # truth for "is this PR healthy."
         run: pnpm check
-
-      - name: Build
-        # tsup emits dist/{cli,hook/cli,mcp/cli,daemon/cli,index,lint/index}.js
-        # plus type declarations. test:e2e spawns the built binaries so
-        # build MUST run before it.
-        run: pnpm build
 
       - name: e2e tests
         # scripts/test-e2e.mjs sets IRIS_E2E=1 in the child env and runs
