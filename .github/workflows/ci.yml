@@ -1,0 +1,82 @@
+name: CI
+
+# Trigger on direct pushes to main (catch the rare commit-straight-to-main
+# case) and every PR targeting main (gates the merge). Branch pushes that
+# aren't in a PR yet skip CI — feature branches run CI when the PR opens.
+# Avoids the double-bill where a PR-branch push triggers BOTH push and
+# pull_request runs across the 9-job matrix.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same ref when a new commit lands. Saves CI
+# minutes on rapid pushes; the most recent commit is the one that matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default — CI shouldn't be able to mutate the repo. The
+# release workflow (Layer 2, separate file) declares its own elevated
+# permissions only where it needs them.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }} / Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't cancel siblings on the first failure — Windows-specific
+      # daemon bugs would mask Linux failures and vice versa. We want
+      # the full picture per push.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Supported range matches package.json `engines.node`: ">=18.18".
+        # 18 = oldest supported, 20 = active LTS, 22 = current.
+        node: [18, 20, 22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        # Must run BEFORE setup-node so node's `cache: pnpm` can find
+        # the pnpm binary. Pin to the same major as packageManager in
+        # package.json (pnpm@9.x).
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install dependencies
+        # --frozen-lockfile fails CI if pnpm-lock.yaml is out of date,
+        # forcing the dev to regenerate it before merging. No silent
+        # lockfile drift between local and CI.
+        run: pnpm install --frozen-lockfile
+
+      - name: Check (typecheck + biome + unit + integration tests)
+        # `pnpm check` is the project's `typecheck && lint && test`
+        # composite; it includes the 330+ vitest run. Single source of
+        # truth for "is this PR healthy."
+        run: pnpm check
+
+      - name: Build
+        # tsup emits dist/{cli,hook/cli,mcp/cli,daemon/cli,index,lint/index}.js
+        # plus type declarations. test:e2e spawns the built binaries so
+        # build MUST run before it.
+        run: pnpm build
+
+      - name: e2e tests
+        # scripts/test-e2e.mjs sets IRIS_E2E=1 in the child env and runs
+        # vitest with the e2e-gated tests un-skipped. These spawn real
+        # iris / iris-hook / iris-mcp / iris-daemon processes against
+        # the freshly-built dist — covers the cross-platform spawn
+        # behavior the in-process tests can't reach.
+        run: pnpm test:e2e
