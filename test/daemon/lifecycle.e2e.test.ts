@@ -66,23 +66,19 @@ describe("iris-daemon status (e2e)", () => {
     expect(r.stdout).toMatch(/not running/);
   });
 
-  test(
-    "reports pid + port + uptime when a daemon is running",
-    async () => {
-      const pid = await startDetachedDaemon(tmp);
-      try {
-        const r = await runDaemon(["status", "--project-root", tmp]);
-        expect(r.code).toBe(0);
-        expect(r.stdout).toMatch(/running for/);
-        expect(r.stdout).toMatch(new RegExp(`pid=${pid}`));
-        expect(r.stdout).toMatch(/port=\d+/);
-        expect(r.stdout).toMatch(/uptime=\d+s/);
-      } finally {
-        await runDaemon(["stop", "--project-root", tmp]);
-      }
-    },
-    20_000,
-  );
+  test("reports pid + port + uptime when a daemon is running", async () => {
+    const pid = await startDetachedDaemon(tmp);
+    try {
+      const r = await runDaemon(["status", "--project-root", tmp]);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toMatch(/running for/);
+      expect(r.stdout).toMatch(new RegExp(`pid=${pid}`));
+      expect(r.stdout).toMatch(/port=\d+/);
+      expect(r.stdout).toMatch(/uptime=\d+s/);
+    } finally {
+      await runDaemon(["stop", "--project-root", tmp]);
+    }
+  }, 20_000);
 });
 
 describe("iris-daemon stop (e2e)", () => {
