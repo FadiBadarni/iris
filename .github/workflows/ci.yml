@@ -43,11 +43,10 @@ jobs:
 
       - name: Setup pnpm
         # Must run BEFORE setup-node so node's `cache: pnpm` can find
-        # the pnpm binary. Pin to the same major as packageManager in
-        # package.json (pnpm@9.x).
+        # the pnpm binary. No `version` here — the action picks up
+        # `packageManager: "pnpm@9.15.0"` from package.json. Specifying
+        # both fails with ERR_PNPM_BAD_PM_VERSION.
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
