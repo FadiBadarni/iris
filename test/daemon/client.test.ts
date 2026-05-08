@@ -51,7 +51,14 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  // Force-drop keep-alive sockets so close() doesn't wait the full
+  // keepAliveTimeout (5s) for fetch's pooled sockets to idle. Without
+  // this, every test takes ~5s on Ubuntu CI and trips vitest's 5s
+  // default timeout — see comment in server.test.ts withDaemon.
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+    (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+  });
 });
 
 describe("lintViaDaemon", () => {

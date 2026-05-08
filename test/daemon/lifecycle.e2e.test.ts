@@ -30,18 +30,21 @@ function runDaemon(args: string[]): Promise<RunResult> {
 async function startDetachedDaemon(projectRoot: string): Promise<number> {
   // Spawn the daemon detached so it survives our test process. We poll
   // the lock file to confirm startup; the test cleans it up via stop.
+  // 10s deadline (was 5s) — Ubuntu CI runners spend 1-3s evaluating the
+  // bundled daemon entry on cold Node startup, leaving little headroom
+  // before vitest's per-test timeout fires.
   const child = spawn("node", [cliPath, "--project-root", projectRoot], {
     detached: true,
     stdio: "ignore",
   });
   child.unref();
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const lock = await readLock(projectRoot);
     if (lock) return lock.pid;
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error("daemon failed to write lock within 5s");
+  throw new Error("daemon failed to write lock within 10s");
 }
 
 let tmp: string;
@@ -63,19 +66,23 @@ describe("iris-daemon status (e2e)", () => {
     expect(r.stdout).toMatch(/not running/);
   });
 
-  test("reports pid + port + uptime when a daemon is running", async () => {
-    const pid = await startDetachedDaemon(tmp);
-    try {
-      const r = await runDaemon(["status", "--project-root", tmp]);
-      expect(r.code).toBe(0);
-      expect(r.stdout).toMatch(/running for/);
-      expect(r.stdout).toMatch(new RegExp(`pid=${pid}`));
-      expect(r.stdout).toMatch(/port=\d+/);
-      expect(r.stdout).toMatch(/uptime=\d+s/);
-    } finally {
-      await runDaemon(["stop", "--project-root", tmp]);
-    }
-  });
+  test(
+    "reports pid + port + uptime when a daemon is running",
+    async () => {
+      const pid = await startDetachedDaemon(tmp);
+      try {
+        const r = await runDaemon(["status", "--project-root", tmp]);
+        expect(r.code).toBe(0);
+        expect(r.stdout).toMatch(/running for/);
+        expect(r.stdout).toMatch(new RegExp(`pid=${pid}`));
+        expect(r.stdout).toMatch(/port=\d+/);
+        expect(r.stdout).toMatch(/uptime=\d+s/);
+      } finally {
+        await runDaemon(["stop", "--project-root", tmp]);
+      }
+    },
+    20_000,
+  );
 });
 
 describe("iris-daemon stop (e2e)", () => {
@@ -104,5 +111,5 @@ describe("iris-daemon stop (e2e)", () => {
       await new Promise((res) => setTimeout(res, 50));
     }
     throw new Error(`daemon (pid ${pid}) did not exit + clear lock within 3s after stop`);
-  }, 10_000);
+  }, 20_000);
 });

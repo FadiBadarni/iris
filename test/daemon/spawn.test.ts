@@ -53,7 +53,15 @@ beforeEach(async () => {
 
 afterEach(async () => {
   const s = server;
-  if (s) await new Promise<void>((resolve) => s.close(() => resolve()));
+  if (s) {
+    // Force-drop keep-alive sockets so close() doesn't wait the full
+    // keepAliveTimeout (5s) for the fetch pool to idle. See comment
+    // in test/daemon/server.test.ts withDaemon.
+    await new Promise<void>((resolve) => {
+      s.close(() => resolve());
+      (s as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+    });
+  }
   await rm(tmp, { recursive: true, force: true });
 });
 

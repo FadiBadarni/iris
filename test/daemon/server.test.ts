@@ -38,7 +38,15 @@ async function withDaemon<T>(
   try {
     return await fn(baseUrl);
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    // Force-drop keep-alive sockets BEFORE awaiting close(). Without
+    // closeAllConnections, server.close() waits up to keepAliveTimeout
+    // (5s default) for fetch's pooled sockets to idle out — which on
+    // Ubuntu CI runners hit our 5s vitest timeout exactly. Locally on
+    // Windows, undici closes sockets faster and we never noticed.
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+    });
   }
 }
 
